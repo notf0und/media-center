@@ -1,86 +1,7 @@
 ---
-version: '2.3'
+version: '3'
 
 services:
-
-  jackett:
-    image: lscr.io/linuxserver/jackett:latest
-    container_name: jackett
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-      - AUTO_UPDATE=true
-    volumes:
-      - ./config/jackett:/config
-      - ${ROOT}/downloads:/downloads
-    ports:
-      - ${JACKETT_PORT}:9117
-    restart: unless-stopped
-
-  sonarr:
-    image: lscr.io/linuxserver/sonarr:latest
-    container_name: sonarr
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-    volumes:
-      - ./config/sonarr:/config
-      - ${ROOT}/downloads:/downloads
-      - ${ROOT}/${DISK1}/tv:/tv
-    ports:
-      - ${SONARR_PORT}:8989
-    restart: unless-stopped  
-
-  radarr:
-    image: lscr.io/linuxserver/radarr:latest
-    container_name: radarr
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-    volumes:
-      - ./config/radarr:/config
-      - ${ROOT}/downloads:/downloads
-      - ${ROOT}/${DISK1}/movies:/movies
-    ports:
-      - ${RADARR_PORT}:7878
-    restart: unless-stopped
-
-  plex:
-    image: lscr.io/linuxserver/plex:latest
-    container_name: plex
-    network_mode: host
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - VERSION=docker
-      - PLEX_CLAIM= #optional
-    volumes:
-      - ./config/plex:/config
-      - ${ROOT}/${DISK1}/tv:/tv
-      - ${ROOT}/${DISK1}/movies:/movies
-    restart: unless-stopped
-
-  transmission:
-    image: lscr.io/linuxserver/transmission:latest
-    container_name: transmission
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-    volumes:
-      - ./config/transmission:/config
-      - ${ROOT}/downloads:/downloads
-      - ${ROOT}/downloads/watch:/watch
-      - ${ROOT}/${DISK1}/tv:/tv
-      - ${ROOT}/${DISK1}/movies:/movies
-    ports:
-      - ${TRANSMISSION_PORT}:9091
-      - 51413:51413
-      - 51413:51413/udp
-    restart: unless-stopped  
 
   bazarr:
     image: lscr.io/linuxserver/bazarr:latest
@@ -91,12 +12,824 @@ services:
       - TZ=${TZ}
     volumes:
       - ./config/bazarr:/config
-      - ${ROOT}/${DISK1}/movies:/movies
-      - ${ROOT}/${DISK1}/tv:/tv
-    ports:
-      - ${BAZARR_PORT}:6767
+      - ./downloads:/data/downloads
+      - /home/gonzalo/code/traefik/generate_certificates/root-certificates/root-ca.crt:/usr/local/share/ca-certificates/root-ca.crt:ro
+    networks:
+      - app-bridge
+    labels:
+      traefik.enable: true
+      traefik.http.routers.bazarr.rule: Host("bazarr") || Host("bazarr.test")
+      traefik.http.routers.bazarr.entrypoints: web
+      traefik.http.routers.bazarr.service: bazarr
+      traefik.http.routers.bazarr.middlewares: bazarr
+      traefik.http.services.bazarr.loadbalancer.server.port: 6767
+      traefik.http.middlewares.bazarr.redirectScheme.scheme: https
+
+      traefik.http.routers.bazarr-https.rule: Host("bazarr") || Host("bazarr.test")
+      traefik.http.routers.bazarr-https.entrypoints: websecure
+      traefik.http.routers.bazarr-https.tls: true
+      traefik.http.routers.bazarr-https.middlewares: authentik-outpost@docker
+
     restart: unless-stopped
 
+  # calibre:
+  #   image: linuxserver/calibre:latest
+  #   container_name: calibre
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   ports:
+  #     # - 80  80:8080
+  #     - 8181:8181
+  #     - 8081:8081
+  #   volumes:
+  #     - ./config/calibre:/config
+  #     - ./downloads:/downloads
+  #   networks:
+  #     - app-bridge
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.calibre.rule: Host("calibre") || Host("calibre.test")
+  #     traefik.http.routers.calibre.entrypoints: web
+  #     traefik.http.routers.calibre.service: calibre
+  #     traefik.http.routers.calibre.middlewares: calibre
+  #     traefik.http.services.calibre.loadbalancer.server.port: 8080
+  #     traefik.http.middlewares.calibre.redirectScheme.scheme: https
+
+  #     traefik.http.routers.calibre-https.rule: Host("calibre") || Host("calibre.test")
+  #     traefik.http.routers.calibre-https.entrypoints: websecure
+  #     traefik.http.routers.calibre-https.tls: true
+
+  #   restart: unless-stopped
+
+  esphome:
+    image: esphome/esphome:latest
+    container_name: esphome
+    network_mode: host
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - VIRTUAL_HOST=esphome.test
+
+    volumes:
+      - ./config/esphome/config:/config
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro
+    # devices: 
+    #   - /dev/serial/by-id/usb-Hades2001_M5stack_4552A3E012-if00-port0:/dev/ttyUSB1
+    labels:
+      traefik.enable: true
+      traefik.http.routers.esphome.rule: Host("esphome") || Host("esphome.test")
+      traefik.http.routers.esphome.service: esphome
+      traefik.http.routers.esphome.entrypoints: web
+      traefik.http.services.esphome.loadbalancer.server.port: 6052
+
+      traefik.http.routers.esphome.middlewares: esphome
+      traefik.http.middlewares.esphome.redirectScheme.scheme: https
+
+      traefik.http.routers.esphome-https.rule: Host("esphome") || Host("esphome.test")
+      traefik.http.routers.esphome-https.entrypoints: websecure
+      traefik.http.routers.esphome-https.tls: true
+
+    restart: unless-stopped
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    network_mode: host
+    privileged: true
+    dns:
+      - 192.168.10.5
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      # - PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+    # extra_hosts:
+      # - "host.docker.internal:host-gateway"
+    # devices:
+    #   - /dev/bus/usb/001/004:/dev/bus/usb/001/004
+    volumes:
+      - ./config/homeassistant:/config
+      - ./config/ssh:/root/.ssh:rw
+      - ./scripts/homeassistant/homeassistant-entrypoint.sh:/homeassistant-entrypoint.sh:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /run/dbus:/run/dbus:ro
+      - /home/gonzalo/code/traefik/generate_certificates/root-certificates/root-ca.crt:/usr/local/share/ca-certificates/root-ca.crt:ro
+
+      # - /home/gonza/code/homeassistant/ha-contact-energy/custom_components/contact_energy:/config/custom_components/contact_energy
+      # - /home/gonza/code/homeassistant/hacs_waste_collection_schedule/custom_components/waste_collection_schedule:/config/custom_components/waste_collection_schedule
+      # - $HOME/.config/pulse/cookie:/root/.config/pulse/cookie
+      # - ${XDG_RUNTIME_DIR}/pulse/native:${XDG_RUNTIME_DIR}/pulse/native
+      # - /var/run/docker.sock:/var/run/docker.sock  # Add this line
+    entrypoint: ['/homeassistant-entrypoint.sh', '/init']
+    labels:
+      # Enable Traefik for this service
+      traefik.enable: true
+
+      # HTTP router configuration
+      traefik.http.routers.homeassistant.rule: (Host("homeassistant") || Host("homeassistant.test")) && !HeaderRegexp("User-Agent", "Mailpit/v.*")
+      traefik.http.routers.homeassistant.service: homeassistant
+      traefik.http.routers.homeassistant.entrypoints: web
+      traefik.http.routers.homeassistant.middlewares: homeassistant
+      traefik.http.services.homeassistant.loadbalancer.server.port: 8123
+
+      # HTTP to HTTPS redirect middleware
+      traefik.http.middlewares.homeassistant.redirectScheme.scheme: https
+
+      # Create a separate HTTP router for Mailpit
+      traefik.http.routers.homeassistant-mailpit.rule: (Host("homeassistant") || Host("homeassistant.test")) && !HeaderRegexp("User-Agent", "Mailpit/v.*")
+      traefik.http.routers.homeassistant-mailpit.service: homeassistant
+      traefik.http.routers.homeassistant-mailpit.entrypoints: web
+
+      # HTTPS router configuration
+      traefik.http.routers.homeassistant-https.rule: Host("homeassistant") || Host("homeassistant.test")
+      traefik.http.routers.homeassistant-https.entrypoints: websecure
+      traefik.http.routers.homeassistant-https.tls: true
+    group_add:
+      - audio
+    restart: unless-stopped
+
+  kavita:
+    image: linuxserver/kavita:latest
+    container_name: kavita
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config/kavita:/config
+      - ./downloads/books:/data
+    networks:
+      - app-bridge
+    labels:
+      traefik.enable: true
+      traefik.http.routers.kavita.rule: Host("kavita") || Host("kavita.test")
+      traefik.http.routers.kavita.entrypoints: web
+      traefik.http.routers.kavita.service: kavita
+      traefik.http.routers.kavita.middlewares: kavita
+
+      traefik.http.services.kavita.loadbalancer.server.port: 5000
+
+      traefik.http.middlewares.kavita.redirectScheme.scheme: https
+      traefik.http.routers.kavita-https.rule: Host("kavita") || Host("kavita.test")
+      traefik.http.routers.kavita-https.entrypoints: websecure
+      traefik.http.routers.kavita-https.tls: true
+      # traefik.http.routers.kavita-https.middlewares: authentik-outpost@docker
+    restart: unless-stopped
+
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: mqtt
+    network_mode: host
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config/mqtt/config:/mosquitto/config
+      - ./config/mqtt/data:/mosquitto/data
+      - ./config/mqtt/log:/mosquitto/log
+    labels:
+      traefik.enable: true
+      traefik.http.routers.mqtt.rule: Host("mqtt") || Host("mqtt.test")
+      traefik.http.routers.mqtt.service: mqtt
+      traefik.http.routers.mqtt.entrypoints: web
+      traefik.http.services.mqtt.loadbalancer.server.port: 1883
+
+      traefik.http.routers.mqtt.middlewares: mqtt
+      traefik.http.middlewares.mqtt.redirectScheme.scheme: https
+      traefik.http.routers.mqtt-https.rule: Host("mqtt") || Host("mqtt.test")
+      traefik.http.routers.mqtt-https.entrypoints: websecure
+      traefik.http.routers.mqtt-https.tls: true
+
+      traefik.http.routers.mqtt-ws.rule: Host("mqtt-ws") || Host("mqtt-ws.test")
+      traefik.http.routers.mqtt-ws.service: mqtt-ws
+      traefik.http.routers.mqtt-ws.entrypoints: web
+      traefik.http.services.mqtt-ws.loadbalancer.server.port: 9001
+
+      traefik.http.routers.mqtt-ws.middlewares: mqtt-ws
+      traefik.http.middlewares.mqtt-ws.redirectScheme.scheme: https
+      traefik.http.routers.mqtt-ws-https.rule: Host("mqtt-ws") || Host("mqtt-ws.test")
+      traefik.http.routers.mqtt-ws-https.entrypoints: websecure
+      traefik.http.routers.mqtt-ws-https.tls: true
+      restart: unless-stopped
+
+  music-assistant:
+    image: ghcr.io/music-assistant/server:latest
+    container_name: music-assistant
+    # Network mode must be set to host for MA to work correctly
+    network_mode: host
+    volumes:
+      - ./config/music-assistant/data:/data/
+      - ./scripts/music-assistant/music-assistant-entrypoint.sh:/mass-entrypoint.sh:ro
+      - /home/gonzalo/code/traefik/generate_certificates/root-certificates/root-ca.crt:/usr/local/share/ca-certificates/root-ca.crt:ro
+    # privileged caps (and security-opt) needed to mount smb folders within the container
+    cap_add:
+      - SYS_ADMIN
+      - DAC_READ_SEARCH
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      # Provide logging level as environment variable.
+      # default=info, possible=(critical, error, warning, info, debug)
+      - LOG_LEVEL=info
+    entrypoint: ["/mass-entrypoint.sh"]
+    labels:
+      traefik.enable: true
+      traefik.http.routers.music-assistant.rule: Host("music-assistant") || Host("music-assistant.test")
+      traefik.http.routers.music-assistant.entrypoints: web
+      traefik.http.routers.music-assistant.service: music-assistant
+      traefik.http.services.music-assistant.loadbalancer.server.port: 8095
+
+      # traefik.http.routers.music-assistant.middlewares: music-assistant
+      # traefik.http.middlewares.music-assistant.redirectScheme.scheme: https
+      traefik.http.routers.music-assistant-https.rule: Host("music-assistant") || Host("music-assistant.test")
+      traefik.http.routers.music-assistant-https.entrypoints: websecure
+      traefik.http.routers.music-assistant-https.service: music-assistant
+      traefik.http.services.music-assistant-https.loadbalancer.server.port: 8095
+
+      traefik.http.routers.music-assistant-https.tls: true
+    restart: unless-stopped
+
+  # node-red:
+  #   image: nodered/node-red
+  #   container_name: node-red
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   networks:
+  #     - app-bridge
+  #   volumes:
+  #     - /etc/localtime:/etc/localtime:ro
+  #     - ./config/node-red/data:/data
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.node-red.rule: Host("node-red") || Host("node-red.test")
+  #     traefik.http.routers.node-red.entrypoints: web
+  #     traefik.http.routers.node-red.service: node-red
+  #     traefik.http.services.node-red.loadbalancer.server.port: 1880
+  #     traefik.http.routers.node-red.middlewares: node-red
+  #     traefik.http.middlewares.node-red.redirectScheme.scheme: https
+  #     traefik.http.routers.node-red-https.rule: Host("node-red") || Host("node-red.test")
+  #     traefik.http.routers.node-red-https.entrypoints: websecure
+  #     traefik.http.routers.node-red-https.tls: true
+  #   restart: unless-stopped
+
+  plex:
+    image: linuxserver/plex:latest
+    container_name: plex
+    network_mode: host
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config/plex:/config
+      - ./config/WebTools.bundle:/config/Library/Application Support/Plex Media Server/Plug-ins/WebTools.bundle
+      - ./downloads:/data/downloads
+      - ./tmp:/transcode
+    labels:
+      traefik.enable: true
+      traefik.http.routers.plex.rule: Host("plex") || Host("plex.test")
+      traefik.http.routers.plex.entrypoints: web
+      traefik.http.routers.plex.service: plex
+      traefik.http.services.plex.loadbalancer.server.port: 32400
+      traefik.http.routers.plex.middlewares: plex
+      traefik.http.middlewares.plex.redirectScheme.scheme: https
+      traefik.http.routers.plex-https.rule: Host("plex") || Host("plex.test")
+      traefik.http.routers.plex-https.entrypoints: websecure
+      traefik.http.routers.plex-https.tls: true
+    restart: unless-stopped
+
+
+  po-token:
+    image: brainicism/bgutil-ytdlp-pot-provider
+    container_name: po-token
+    network_mode: host
+    labels:
+      traefik.enable: true
+      traefik.http.routers.po-token.rule: Host("po-token") || Host("po-token.test")
+      traefik.http.routers.po-token.entrypoints: web
+      traefik.http.routers.po-token.service: po-token
+      traefik.http.services.po-token.loadbalancer.server.port: 4416
+
+      traefik.http.routers.po-token.middlewares: po-token
+      traefik.http.middlewares.po-token.redirectScheme.scheme: https
+      traefik.http.routers.po-token-https.rule: Host("po-token") || Host("po-token.test")
+      traefik.http.routers.po-token-https.entrypoints: websecure
+      traefik.http.routers.po-token-https.tls: true
+
+    restart: unless-stopped
+
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - DISABLE_IPV6=1  # Disable IPv6 in Prowlarr
+    dns_search: .
+    volumes:
+      - ./config/prowlarr:/config
+    networks:
+      - app-bridge
+    labels:
+      traefik.enable: true
+      traefik.http.routers.prowlarr.rule: Host("prowlarr") || Host("prowlarr.test")
+      traefik.http.routers.prowlarr.service: prowlarr
+      traefik.http.routers.prowlarr.entrypoints: web
+      traefik.http.services.prowlarr.loadbalancer.server.port: 9696
+
+      traefik.http.routers.prowlarr.middlewares: prowlarr
+      traefik.http.middlewares.prowlarr.redirectScheme.scheme: https
+      traefik.http.routers.prowlarr-https.rule: Host("prowlarr") || Host("prowlarr.test")
+      traefik.http.routers.prowlarr-https.entrypoints: websecure
+      traefik.http.routers.prowlarr-https.tls: true
+    restart: unless-stopped
+
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config/radarr:/config
+      - ./downloads:/data/downloads
+    networks:
+      - app-bridge
+    dns_search: .
+    labels:
+      traefik.enable: true
+      traefik.http.routers.radarr.rule: Host("radarr") || Host("radarr.test")
+      traefik.http.routers.radarr.service: radarr
+      traefik.http.routers.radarr.entrypoints: web
+      traefik.http.services.radarr.loadbalancer.server.port: 7878
+
+      traefik.http.routers.radarr.middlewares: radarr
+      traefik.http.middlewares.radarr.redirectScheme.scheme: https
+      traefik.http.routers.radarr-https.rule: Host("radarr") || Host("radarr.test")
+      traefik.http.routers.radarr-https.entrypoints: websecure
+      traefik.http.routers.radarr-https.tls: true
+    restart: unless-stopped
+
+  readarr:
+    image: linuxserver/readarr:0.4.19-nightly
+    container_name: readarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config/readarr:/config
+      - ./downloads:/data/downloads
+    networks:
+      - app-bridge
+    dns_search: .
+    labels:
+      traefik.enable: true
+      traefik.http.routers.readarr.rule: Host("readarr") || Host("readarr.test")
+      traefik.http.routers.readarr.service: readarr
+      traefik.http.routers.readarr.entrypoints: web
+      traefik.http.services.readarr.loadbalancer.server.port: 8787
+
+      traefik.http.routers.readarr.middlewares: readarr
+      traefik.http.middlewares.readarr.redirectScheme.scheme: https
+      traefik.http.routers.readarr-https.rule: Host("readarr") || Host("readarr.test")
+      traefik.http.routers.readarr-https.entrypoints: websecure
+      traefik.http.routers.readarr-https.tls: true
+    restart: unless-stopped
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    volumes:
+      - ./config/sonarr:/config
+      - ./downloads:/data/downloads   
+    networks:
+      - app-bridge
+    dns_search: .
+    labels:
+      traefik.enable: true
+      traefik.http.routers.sonarr.rule: Host("sonarr") || Host("sonarr.test")
+      traefik.http.routers.sonarr.service: sonarr
+      traefik.http.routers.sonarr.entrypoints: web
+      traefik.http.services.sonarr.loadbalancer.server.port: 8989
+
+      traefik.http.routers.sonarr.middlewares: sonarr
+      traefik.http.middlewares.sonarr.redirectScheme.scheme: https
+      traefik.http.routers.sonarr-https.rule: Host("sonarr") || Host("sonarr.test")
+      traefik.http.routers.sonarr-https.entrypoints: websecure
+      traefik.http.routers.sonarr-https.tls: true
+    restart: unless-stopped
+
+  threadfin:
+    image: fyb3roptik/threadfin
+    container_name: threadfin
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config/threadfin/conf:/home/threadfin/conf
+      - ./config/threadfin/tmp:/tmp/xteve
+    networks:
+      - app-bridge
+    labels:
+      traefik.enable: true
+      traefik.http.routers.threadfin.rule: Host("threadfin") || Host("threadfin.test")
+      traefik.http.routers.threadfin.service: threadfin
+      traefik.http.routers.threadfin.entrypoints: web
+      traefik.http.services.threadfin.loadbalancer.server.port: 34400
+
+      traefik.http.routers.threadfin-https.rule: Host("threadfin") || Host("threadfin.test")
+      traefik.http.routers.threadfin-https.entrypoints: websecure
+      traefik.http.routers.threadfin-https.tls: true
+      traefik.http.services.threadfin-https.loadbalancer.server.port: 34400
+    restart: unless-stopped
+
+  # tvheadend:
+  #   image: linuxserver/tvheadend:latest
+  #   container_name: tvheadend
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   volumes:
+  #     - ./config/tvheadend/config:/config
+  #     - ./config/tvheadend/recordings:/recordings
+  #   ports:
+  #     - 9981:9981
+  #     - 9982:9982
+  #   networks:
+  #     - app-bridge
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.tvheadend.rule: Host(`tvheadend`, `tvheadend.test`)
+  #     traefik.http.routers.tvheadend.service: tvheadend
+  #     traefik.http.routers.tvheadend.entrypoints: web
+  #     traefik.http.services.tvheadend.loadbalancer.server.port: 9981
+
+  #     traefik.http.routers.tvheadend.middlewares: tvheadend
+  #     traefik.http.middlewares.tvheadend.redirectScheme.scheme: https
+  #     traefik.http.routers.tvheadend-https.rule: Host(`tvheadend`, `tvheadend.test`)
+  #     traefik.http.routers.tvheadend-https.entrypoints: websecure
+  #     traefik.http.routers.tvheadend-https.tls: true
+  #   restart: unless-stopped
+
+  transmission:
+    image: linuxserver/transmission:latest
+    container_name: transmission
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config/transmission:/config
+      - ./downloads:/downloads
+      - /home/gonza/code/switch-games-server/switch-games-server/storage/app/public/games:/downloads/games
+    ports:
+      - 9091:9091
+      - 51413:51413
+      - 51413:51413/udp
+    networks:
+      - app-bridge
+    labels:
+      traefik.enable: true
+      traefik.http.routers.transmission.rule: Host("transmission") || Host("transmission.test")
+      traefik.http.routers.transmission.service: transmission
+      traefik.http.routers.transmission.entrypoints: web
+      traefik.http.services.transmission.loadbalancer.server.port: 9091
+
+      traefik.http.routers.transmission.middlewares: transmission
+      traefik.http.middlewares.transmission.redirectScheme.scheme: https
+      traefik.http.routers.transmission-https.rule: Host("transmission") || Host("transmission.test")
+      traefik.http.routers.transmission-https.entrypoints: websecure
+      traefik.http.routers.transmission-https.tls: true
+    restart: unless-stopped
+
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:latest
+    container_name: zigbee2mqtt
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    # dns:
+    #     - 192.168.10.5
+    group_add:
+      - dialout
+    user: 1000:1000
+    volumes:
+      - ./config/zigbee2mqtt:/app/data
+      - /run/udev:/run/udev:ro
+      - /home/shared/code/traefik/generate_certificates/root-certificates:/etc/ssl/root
+      - /home/shared/code/traefik/config/certificates:/etc/ssl/user
+    networks:
+      - app-bridge
+    devices:
+      - /dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_4e9d22083ab6ed11b30ad40ea8669f5d-if00-port0:/dev/ttyUSB0
+    labels:
+      traefik.enable: true
+      traefik.http.routers.zigbee2mqtt.rule: Host("zigbee2mqtt") || Host("zigbee2mqtt.test")
+      traefik.http.routers.zigbee2mqtt.service: zigbee2mqtt
+      traefik.http.routers.zigbee2mqtt.entrypoints: web
+      traefik.http.services.zigbee2mqtt.loadbalancer.server.port: 80
+      traefik.http.routers.zigbee2mqtt.middlewares: zigbee2mqtt
+      traefik.http.middlewares.zigbee2mqtt.redirectScheme.scheme: https
+
+      traefik.http.routers.zigbee2mqtt-https.rule: Host("zigbee2mqtt") || Host("zigbee2mqtt.test")
+      traefik.http.routers.zigbee2mqtt-https.entrypoints: websecure 
+      traefik.http.routers.zigbee2mqtt-https.tls: true
+      traefik.http.routers.zigbee2mqtt-https.middlewares: authentik-outpost@docker
+
+    depends_on:
+      - mqtt
+    restart: unless-stopped
+  # ntopng:
+  #   image: ntop/ntopng.dev:latest
+  #   container_name: ntopng
+  #   network_mode: "host"
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   volumes:
+  #     - ./config/ntopng:/app/data
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.ntopng.rule: Host("ntopng") || Host("ntopng.test")
+  #     traefik.http.routers.ntopng.service: ntopng
+  #     traefik.http.routers.ntopng.entrypoints: web
+  #     traefik.http.services.ntopng.loadbalancer.server.port: 3000
+
+  #     traefik.http.routers.ntopng.middlewares: ntopng
+  #     traefik.http.middlewares.ntopng.redirectScheme.scheme: https
+
+  #     traefik.http.routers.ntopng-https.rule: Host("ntopng") || Host("ntopng.test")
+  #     traefik.http.routers.ntopng-https.entrypoints: websecure
+  #     traefik.http.routers.ntopng-https.tls: true
+
+  #   restart: unless-stopped
+
+  # openwakeword:
+  #   image: rhasspy/wyoming-openwakeword:latest
+  #   container_name: openwakeword
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   volumes:
+  #     - ./config/openwakeword:/data
+  #     - ./config/openwakeword/custom:/custom
+  #   network_mode: host
+  #   command: --uri tcp://0.0.0.0:10400 --preload-model ok_nabu --custom-model-dir /custom
+  #   restart: unless-stopped
+
+  parakeet-asr:
+    build:
+      context: ./Dockerfiles/wyoming-parakeet
+      dockerfile: Dockerfile
+    container_name: parakeet-asr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - HF_HOME=/data
+    volumes:
+      - ./config/parakeet-asr:/data
+    network_mode: host
+    command: --uri tcp://0.0.0.0:10300 --model-en nemo-parakeet-tdt-0.6b-v3
+    restart: unless-stopped
+
+  # piper:
+  #   image: rhasspy/wyoming-piper:latest
+  #   container_name: piper
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   volumes:
+  #     - ./config/piper:/data
+  #   network_mode: host
+  #   command: --uri tcp://0.0.0.0:10200 --voice en_US-lessac-medium --download-dir /data
+  #   restart: unless-stopped
+
+  kokoro-tts:
+    image: nordwestt/kokoro-wyoming:latest
+    container_name: kokoro-tts
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./config/kokoro:/data
+    network_mode: host
+    restart: unless-stopped
+
+  streamlink:
+    build:
+      context: ./Dockerfiles/streamlink # The directory containing the Dockerfile
+      dockerfile: ./Dockerfile # Path to the Dockerfile (relative to the context)
+    # image: streamlink-latest:latest # Tag for the built image
+    container_name: streamlink
+    volumes:
+      - ./streams.yaml:/config/streams.yaml # Mount the streams.yaml file
+    networks:
+      - app-bridge
+    ports:
+      - 46200-46250:46200-46250
+    restart: unless-stopped
+
+  dockermon:
+    image: philhawthorne/ha-dockermon
+    container_name: dockermon
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/dockermon:/data
+    networks:
+      - app-bridge
+    labels:
+      traefik.enable: true
+      traefik.http.routers.dockermon.rule: Host("dockermon") || Host("dockermon.test")
+      traefik.http.routers.dockermon.service: dockermon
+      traefik.http.routers.dockermon.entrypoints: web
+      traefik.http.services.dockermon.loadbalancer.server.port: 8126
+
+      traefik.http.routers.dockermon.middlewares: dockermon
+      traefik.http.middlewares.dockermon.redirectScheme.scheme: https
+      traefik.http.routers.dockermon-https.rule: Host("dockermon") || Host("dockermon.test")
+      traefik.http.routers.dockermon-https.entrypoints: websecure
+      traefik.http.routers.dockermon-https.tls: true
+
+    restart: unless-stopped
+
+  glances:
+    image: nicolargo/glances:latest-full
+    container_name: glances
+    network_mode: host
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - GLANCES_OPT=-C /glances/conf/glances.conf -w
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "/run/user/1000/podman/podman.sock:/run/user/1000/podman/podman.sock:ro"
+      - "./config/glances/glances.conf:/glances/conf/glances.conf"
+    pid: "host"
+    privileged: true
+    labels:
+      traefik.enable: true
+      traefik.http.routers.glances.rule: Host("glances") || Host("glances.test")
+      traefik.http.routers.glances.service: glances
+      traefik.http.routers.glances.entrypoints: web
+      traefik.http.services.glances.loadbalancer.server.port: 61208
+
+      traefik.http.routers.glances.middlewares: glances
+      traefik.http.middlewares.glances.redirectScheme.scheme: https
+      traefik.http.routers.glances-https.rule: Host("glances") || Host("glances.test")
+      traefik.http.routers.glances-https.entrypoints: websecure
+      traefik.http.routers.glances-https.tls: true
+
+    restart: unless-stopped
+
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mailpit
+    environment:
+      - MP_SMTP_BIND_ADDR=0.0.0.0:1025
+      - MP_WEB_BIND_ADDR=0.0.0.0:8025
+      - MP_WEBHOOK_URL=http://homeassistant.test/api/webhook/-t7_g97rYd0LzTEJBCO3t0ZzO
+      - MP_SMTP_RELAY_CONFIG=/config/relay.yaml
+      - MP_SMTP_RELAY_MATCHING=irenakukhtina@pbsync.com
+    dns_search: .
+    
+    networks:
+      - app-bridge
+    ports:
+      - 1025:1025
+    volumes:
+      - ./config/mailpit:/config
+    labels:
+      traefik.enable: true
+      traefik.http.routers.mailpit.rule: Host("mailpit") || Host("mailpit.test")
+      traefik.http.routers.mailpit.service: mailpit
+      traefik.http.routers.mailpit.entrypoints: web
+      traefik.http.services.mailpit.loadbalancer.server.port: 8025
+      traefik.http.routers.mailpit.middlewares: mailpit
+      traefik.http.middlewares.mailpit.redirectScheme.scheme: https
+      traefik.http.routers.mailpit-https.rule: Host("mailpit") || Host("mailpit.test")
+      traefik.http.routers.mailpit-https.entrypoints: websecure
+      traefik.http.routers.mailpit-https.tls: true
+    restart: unless-stopped
+
+
+
+
+  # docker run --rm -e TZ="${TZ}" -v /var/run/docker.sock:/var/run/docker.sock:ro -v /run/user/1000/podman/podman.sock:/run/user/1000/podman/podman.sock:ro --pid host --network host -it nicolargo/glances:latest-full
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_ORIGINS=*
+    volumes:
+      - ./config/ollama:/root/.ollama
+    networks:
+      - app-bridge
+    labels:
+      traefik.enable: true
+      traefik.http.routers.ollama.rule: Host("ollama") || Host("ollama.test")
+      traefik.http.routers.ollama.service: ollama
+      traefik.http.routers.ollama.entrypoints: web
+      traefik.http.services.ollama.loadbalancer.server.port: 11434
+      traefik.http.routers.ollama.middlewares: ollama
+      traefik.http.middlewares.ollama.redirectScheme.scheme: https
+      traefik.http.routers.ollama-https.rule: Host("ollama") || Host("ollama.test")
+      traefik.http.routers.ollama-https.entrypoints: websecure
+      traefik.http.routers.ollama-https.tls: true
+    restart: unless-stopped
+
+  llama-cpp:
+    # CPU-only is faster than Intel UHD 630 for this workload
+    # To enable Vulkan/GPU: change image to :server-vulkan and add --n-gpu-layers 33
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: llama-cpp
+    command: >
+      --model /models/model.gguf
+      --host 0.0.0.0
+      --port 8080
+      --ctx-size 2048
+      --threads 4
+      --parallel 1
+      --cont-batching
+      --timeout 600
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    # Uncomment for Vulkan support (slower on Intel UHD 630)
+    # devices:
+    #   - /dev/dri/renderD128:/dev/dri/renderD128
+    volumes:
+      - ./config/llama-cpp/models:/models
+    networks:
+      - app-bridge
+    labels:
+      traefik.enable: true
+      traefik.http.routers.llama-cpp.rule: Host("llama") || Host("llama.test")
+      traefik.http.routers.llama-cpp.service: llama-cpp
+      traefik.http.routers.llama-cpp.entrypoints: web
+      traefik.http.services.llama-cpp.loadbalancer.server.port: 8080
+      traefik.http.routers.llama-cpp.middlewares: llama-cpp
+      traefik.http.middlewares.llama-cpp.redirectScheme.scheme: https
+      traefik.http.routers.llama-cpp-https.rule: Host("llama") || Host("llama.test")
+      traefik.http.routers.llama-cpp-https.entrypoints: websecure
+      traefik.http.routers.llama-cpp-https.tls: true
+    restart: unless-stopped
+
+  # plextraktsync:
+  #   image: ghcr.io/taxel/plextraktsync
+  #   command: sync
+  #   container_name: plextraktsync
+  #   restart: on-failure:2
+  #   volumes:
+  #     - ./config/plextraktsync:/app/config
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+
 networks:
-  media-center-network:
-    external: true    
+  app-bridge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+          gateway: 172.21.0.1
+    external: true
