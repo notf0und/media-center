@@ -75,8 +75,10 @@ fill_template() {
 }
 
 GLOBAL_TMPL="/app/templates/global"
+fill_template "${GLOBAL_TMPL}/voicebm_config.py.template"          /app/voicebm_config.py
 fill_template "${GLOBAL_TMPL}/voicebm_stt_service.py.template"     /app/voicebm_stt_service.py
 fill_template "${GLOBAL_TMPL}/voicebm_global_publisher.py.template" /app/voicebm_global_publisher.py
+fill_template "${GLOBAL_TMPL}/audio_server.py.template"            /app/audio_server.py
 
 [ -f "${GLOBAL_TMPL}/enrollment_watcher.py.template" ] && \
     fill_template "${GLOBAL_TMPL}/enrollment_watcher.py.template" /app/enrollment_watcher.py
@@ -92,6 +94,11 @@ python3 /app/voicebm_stt_service.py &
 
 echo "[voicebm] Starting voicebm_global_publisher..."
 python3 /app/voicebm_global_publisher.py &
+
+if [ -f /app/audio_server.py ]; then
+    echo "[voicebm] Starting audio_server on port 9090..."
+    python3 /app/audio_server.py &
+fi
 
 if [ -f /app/enrollment_watcher.py ]; then
     echo "[voicebm] Starting enrollment_watcher..."
