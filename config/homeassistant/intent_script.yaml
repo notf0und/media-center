@@ -1,0 +1,210 @@
+CustomOutsideHumidity:
+  speech:
+    text: "It is currently {{ state_attr('weather.home', 'humidity') }}% humidity outside."
+
+# ---------------------------------------------------------------------------
+# VoiceBM: speaker-aware phone location using Bermuda BLE trilateration
+#
+# VoiceBM publishes the current speaker to MQTT topic:
+#   voicebm/living/current_speaker  →  sensor.voicebm_current_speaker
+#
+# For "where is my phone" we read who spoke (from sensor) and look up their
+# phone's Bermuda area sensor.  Add your users below.
+# ---------------------------------------------------------------------------
+FindMyPhone:
+  speech:
+    text: >-
+      {% set speaker_raw = states('sensor.voicebm_current_speaker') %}
+      {% if speaker_raw not in ('unknown', 'unavailable', '') %}
+        {% set speaker = (speaker_raw | from_json).display_name | lower %}
+      {% else %}
+        {% set speaker = 'unknown' %}
+      {% endif %}
+
+      {% if speaker in ['gonzalo'] %}
+        {% set area = states('sensor.oneplus_7_pro_area_last_seen') %}
+        {% if area not in ('unknown', 'unavailable', '') %}
+          Gonzalo, your phone was last seen in the {{ area }}.
+        {% else %}
+          Sorry, I cannot locate your phone right now.
+        {% endif %}
+
+      {% elif speaker in ['irina'] %}
+        {% set area = states('sensor.iphone_irina_area_last_seen') %}
+        {% if area not in ('unknown', 'unavailable', '') %}
+          Irina, your phone was last seen in the {{ area }}.
+        {% else %}
+          Sorry, I cannot locate Irina's phone right now.
+        {% endif %}
+
+      {% else %}
+        I could not identify who is asking. Please enroll your voice in the VoiceBM dashboard.
+      {% endif %}
+
+FindPartnerPhone:
+  speech:
+    text: >-
+      {% set area = states('sensor.iphone_irina_area_last_seen') %}
+      {% if area not in ('unknown', 'unavailable', '') %}
+        Irina's phone was last seen in the {{ area }}.
+      {% else %}
+        Sorry, I cannot locate Irina's phone right now.
+      {% endif %}
+
+CustomOutsideTemperature:
+  speech:
+    text: "It is currently {{ state_attr('weather.home', 'temperature') }}° outside."
+CustomWeatherForecast:
+  speech:
+    text: >-
+      {% set current_hour = now().hour %}
+      {% set is_asking_today = (day is defined and day|lower == 'today') or day is not defined %}
+      {% set use_current = is_asking_today and current_hour >= 18 %}
+      
+      {% if use_current %}
+        {# After 6 PM, use current conditions for "today" #}
+        {% set current_temp = state_attr('weather.home', 'temperature') %}
+        {% set current_condition = states('weather.home') %}
+        {% set humidity = state_attr('weather.home', 'humidity') %}
+        {% set wind_speed = state_attr('weather.home', 'wind_speed') %}
+        {% set wind_bearing = state_attr('weather.home', 'wind_bearing') %}
+        {% set hourly_forecasts = state_attr('weather.home', 'forecast_hourly') %}
+        
+        {% set condition_friendly = {
+          'clear-night': 'clear',
+          'cloudy': 'cloudy',
+          'fog': 'foggy',
+          'partlycloudy': 'partly cloudy',
+          'pouring': 'pouring rain',
+          'rainy': 'rainy',
+          'snowy': 'snowy',
+          'sunny': 'clear',
+          'windy': 'windy',
+          'exceptional': 'exceptional weather'
+        } %}
+        {% set direction_friendly = {
+          'N': 'north',
+          'NE': 'northeast',
+          'E': 'east',
+          'SE': 'southeast',
+          'S': 'south',
+          'SW': 'southwest',
+          'W': 'west',
+          'NW': 'northwest'
+        } %}
+        {% set condition_text = condition_friendly.get(current_condition, current_condition) %}
+        {% set direction_text = direction_friendly.get(wind_bearing, wind_bearing|lower) %}
+        
+        Right now it's {{ condition_text }} at {{ current_temp }}°, with {{ humidity }}% humidity
+        {%- if wind_speed and wind_speed > 5 %} and {{ wind_speed|round(0) }} kilometers per hour winds from the {{ direction_text }}{% endif %}.
+        
+        {# Look ahead at next few hours #}
+        {% if hourly_forecasts and hourly_forecasts|length > 3 %}
+          {% set next_3h = hourly_forecasts[2] %}
+          {% set next_condition = condition_friendly.get(next_3h.condition, next_3h.condition) %}
+          
+          {% if next_3h.condition != current_condition %}
+            Expect {{ next_condition }} conditions in the next few hours
+            {%- if next_3h.precipitation and next_3h.precipitation > 0 %}, with {{ next_3h.precipitation }} millimeters of rain{% endif %}.
+          {% elif next_3h.temperature|float > current_temp|float + 2 %}
+            Temperatures will rise to around {{ next_3h.temperature }}°.
+          {% elif next_3h.temperature|float < current_temp|float - 2 %}
+            Temperatures will drop to around {{ next_3h.temperature }}°.
+          {% else %}
+            Conditions will remain {{ condition_text }} for the rest of the evening.
+          {% endif %}
+        {% endif %}
+      {% else %}
+        {# Use forecast data #}
+        {% set forecasts = state_attr('weather.home', 'forecast_daily') %}
+        {% if not forecasts %}
+          I don't have forecast data available.
+        {% else %}
+          {% set target_date = now().date() %}
+          {% set weekday_map = {
+            'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+            'friday': 4, 'saturday': 5, 'sunday': 6
+          } %}
+          {% set condition_friendly = {
+            'clear-night': 'clear skies',
+            'cloudy': 'cloudy',
+            'fog': 'foggy',
+            'hail': 'hail',
+            'lightning': 'thunderstorms',
+            'lightning-rainy': 'thunderstorms with rain',
+            'partlycloudy': 'partly cloudy',
+            'pouring': 'heavy rain',
+            'rainy': 'rainy',
+            'snowy': 'snowy',
+            'snowy-rainy': 'snowy with rain',
+            'sunny': 'sunny',
+            'windy': 'windy',
+            'windy-variant': 'windy',
+            'exceptional': 'exceptional weather'
+          } %}
+
+          {# Handle day words #}
+          {% set day_name = 'today' %}
+          {% if day is defined %}
+            {% set day_lower = day|lower %}
+            {% if day_lower == 'today' %}
+              {% set target_date = now().date() %}
+              {% set day_name = 'today' %}
+            {% elif day_lower == 'tomorrow' %}
+              {% set target_date = (now() + timedelta(days=1)).date() %}
+              {% set day_name = 'tomorrow' %}
+            {% elif day_lower == 'after tomorrow' %}
+              {% set target_date = (now() + timedelta(days=2)).date() %}
+              {% set day_name = 'the day after tomorrow' %}
+            {% elif day_lower in weekday_map %}
+              {% set weekday_index = weekday_map[day_lower] %}
+              {% set today_index = now().weekday() %}
+              {% set delta_days = (weekday_index - today_index) % 7 %}
+              {% if delta_days == 0 %}
+                {% set delta_days = 7 %}
+              {% endif %}
+              {% set target_date = (now() + timedelta(days=delta_days)).date() %}
+              {% set day_name = day_lower %}
+            {% endif %}
+          {% endif %}
+
+          {# Find matching forecast #}
+          {% set ns = namespace(match=none) %}
+          {% for forecast in forecasts %}
+            {% if ns.match is none and forecast.datetime is defined and target_date|string in forecast.datetime %}
+              {% set ns.match = forecast %}
+            {% endif %}
+          {% endfor %}
+
+          {% if ns.match %}
+            {% set condition_text = condition_friendly.get(ns.match.condition, ns.match.condition) %}
+            
+            {% if day_name == 'today' %}
+              {% if current_hour < 12 %}
+                Today will be {{ condition_text }}, with a high of {{ ns.match.temperature }}° and a low of {{ ns.match.templow }}°.
+              {% else %}
+                This afternoon will be {{ condition_text }}, with temperatures up to {{ ns.match.temperature }}°.
+              {% endif %}
+            {% else %}
+              On {{ day_name }}, expect {{ condition_text }} weather, with a high of {{ ns.match.temperature }}° and a low of {{ ns.match.templow }}°.
+            {% endif %}
+            
+            {% if ns.match.condition in ['rainy', 'pouring', 'lightning-rainy'] %}
+              Don't forget your umbrella!
+            {% elif ns.match.condition == 'sunny' and ns.match.temperature|int > 25 %}
+              It's going to be a hot one, stay hydrated!
+            {% elif ns.match.condition in ['snowy', 'snowy-rainy'] %}
+              Bundle up, it's going to be cold!
+            {% endif %}
+          {% else %}
+            I don't have a forecast for {{ day_name }}. My forecast data only covers the next {{ forecasts|length }} days.
+          {% endif %}
+
+        {% endif %}
+      {% endif %}
+CurrentDate:
+  speech:
+    text: >
+      {% set day = now().day %}
+      {% set suffix = 'th' if 11 <= day <= 13 else {1:'st', 2:'nd', 3:'rd'}.get(day % 10, 'th') %}
+      Today is {{ now().strftime('%A') }}, {{ day }}{{ suffix }} of {{ now().strftime('%B, %Y') }}

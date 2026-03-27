@@ -1,0 +1,16 @@
+language: "en"
+intents:
+  FindMyPhone:
+    data:
+      - sentences:
+          - "where is my phone"
+          - "find my phone"
+          - "where did I leave my phone"
+          - "where's my phone"
+
+  FindPartnerPhone:
+    data:
+      - sentences:
+          - "where is [her|Irina's] phone"
+          - "find [her|Irina's] phone"
+          - "where is my partner's phone"

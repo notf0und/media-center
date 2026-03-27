@@ -384,32 +384,32 @@ services:
       traefik.http.routers.radarr-https.tls: true
     restart: unless-stopped
 
-  readarr:
-    image: linuxserver/readarr:0.4.19-nightly
-    container_name: readarr
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-    volumes:
-      - ./config/readarr:/config
-      - ./downloads:/data/downloads
-    networks:
-      - app-bridge
-    dns_search: .
-    labels:
-      traefik.enable: true
-      traefik.http.routers.readarr.rule: Host("readarr") || Host("readarr.test")
-      traefik.http.routers.readarr.service: readarr
-      traefik.http.routers.readarr.entrypoints: web
-      traefik.http.services.readarr.loadbalancer.server.port: 8787
+  # readarr:
+  #   image: linuxserver/readarr:0.4.19-nightly
+  #   container_name: readarr
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   volumes:
+  #     - ./config/readarr:/config
+  #     - ./downloads:/data/downloads
+  #   networks:
+  #     - app-bridge
+  #   dns_search: .
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.readarr.rule: Host("readarr") || Host("readarr.test")
+  #     traefik.http.routers.readarr.service: readarr
+  #     traefik.http.routers.readarr.entrypoints: web
+  #     traefik.http.services.readarr.loadbalancer.server.port: 8787
 
-      traefik.http.routers.readarr.middlewares: readarr
-      traefik.http.middlewares.readarr.redirectScheme.scheme: https
-      traefik.http.routers.readarr-https.rule: Host("readarr") || Host("readarr.test")
-      traefik.http.routers.readarr-https.entrypoints: websecure
-      traefik.http.routers.readarr-https.tls: true
-    restart: unless-stopped
+  #     traefik.http.routers.readarr.middlewares: readarr
+  #     traefik.http.middlewares.readarr.redirectScheme.scheme: https
+  #     traefik.http.routers.readarr-https.rule: Host("readarr") || Host("readarr.test")
+  #     traefik.http.routers.readarr-https.entrypoints: websecure
+  #     traefik.http.routers.readarr-https.tls: true
+  #   restart: unless-stopped
 
   sonarr:
     image: linuxserver/sonarr:latest
@@ -502,7 +502,7 @@ services:
     volumes:
       - ./config/transmission:/config
       - ./downloads:/downloads
-      - /home/gonza/code/switch-games-server/switch-games-server/storage/app/public/games:/downloads/games
+      - /home/gonzalo/code/switch-games-server/switch-games-server/storage/app/public/games:/downloads/games
     ports:
       - 9091:9091
       - 51413:51413
@@ -611,10 +611,51 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
       - HF_HOME=/data
+      - PARAKEET_WYOMING_PORT=10300  # Wyoming protocol port for Home Assistant
+      - PARAKEET_API_PORT=5052       # OpenAI API port for OpenWebUI
     volumes:
       - ./config/parakeet-asr:/data
     network_mode: host
-    command: --uri tcp://0.0.0.0:10300 --model-en nemo-parakeet-tdt-0.6b-v3
+    entrypoint: ["/bin/bash", "/data/start_services.sh"]
+    restart: unless-stopped
+
+  voicebm:
+    build:
+      context: ./Dockerfiles/voicebm
+      dockerfile: Dockerfile
+    container_name: voicebm
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      # Speaker recognition model — single .onnx file downloaded on first start.
+      # English models: nemo_en_titanet_small.onnx (38MB, default)
+      #                 nemo_en_titanet_large.onnx (97MB, most accurate)
+      #                 nemo_en_speakerverification_speakernet.onnx (22MB, smallest)
+      #                 wespeaker_en_voxceleb_CAM++_LM.onnx (28MB)
+      #                 wespeaker_en_voxceleb_resnet293_LM.onnx (109MB)
+      #                 3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx (28MB)
+      - SHERPA_MODEL_NAME=nemo_en_titanet_small.onnx
+      # VoiceBM data directory (mounted from host — holds model, enrollments, etc.)
+      - VOICEBM_BASE=/data
+      # Wyoming proxy — HA connects here instead of parakeet:10300
+      - VOICEBM_WYOMING_PORT=10301
+      # Upstream Parakeet Wyoming address (supports hostname/IP for Traefik etc.)
+      - UPSTREAM_WYOMING_URI=tcp://localhost:10300
+      # Speaker injection: false = speaker only in MQTT sensor (recommended)
+      #                    true  = prepend name to transcript ("Gonzalo: ...")
+      - VOICEBM_INJECT_SPEAKER=false
+      - VOICEBM_ANALYSIS_TIMEOUT=20
+      # Dashboard port (enrollment UI)
+      - VOICEBM_DASHBOARD_PORT=5055
+      # MQTT broker (for speaker ID requests and HA sensor publishing)
+      - MQTT_BROKER=localhost
+      - MQTT_PORT=1883
+      - MQTT_USER=mqtt
+      - MQTT_PASS=we7VMNXYXpWgUfYWdNUdoW
+    volumes:
+      - ./config/voicebm:/data
+    network_mode: host
     restart: unless-stopped
 
   # piper:
@@ -631,15 +672,40 @@ services:
   #   restart: unless-stopped
 
   kokoro-tts:
-    image: nordwestt/kokoro-wyoming:latest
+    build:
+      context: ./Dockerfiles/kokoro-tts
+      dockerfile: Dockerfile
     container_name: kokoro-tts
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
+      - KOKORO_WYOMING_PORT=10210  # Wyoming protocol port for Home Assistant
+      - KOKORO_API_PORT=5051       # OpenAI API port for OpenWebUI
+      - KOKORO_SPEED=1.0           # Speech speed multiplier (0.5-2.0)
     volumes:
       - ./config/kokoro:/data
     network_mode: host
+    entrypoint: ["/bin/bash", "/data/start_services.sh"]
+    restart: unless-stopped
+
+  supertonic-tts:
+    build:
+      context: ./Dockerfiles/supertonic-tts
+      dockerfile: Dockerfile
+    container_name: supertonic-tts
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - SUPERTONIC_STEPS=30        # Denoising steps (1-10, lower=faster but lower quality)
+      - SUPERTONIC_SPEED=1.30      # Speech speed multiplier (0.5-2.0)
+      - OPENAI_API_PORT=5050       # OpenAI API port for OpenWebUI
+    volumes:
+      - ./config/supertonic:/config
+      - ./config/supertonic:/data
+    network_mode: host
+    entrypoint: ["/bin/bash", "/config/start_services.sh"]
     restart: unless-stopped
 
   streamlink:
@@ -648,12 +714,13 @@ services:
       dockerfile: ./Dockerfile # Path to the Dockerfile (relative to the context)
     # image: streamlink-latest:latest # Tag for the built image
     container_name: streamlink
+    network_mode: host
+    # networks:
+    #   - app-bridge
+    # ports:
+    #   - 46200-46250:46200-46250
     volumes:
       - ./streams.yaml:/config/streams.yaml # Mount the streams.yaml file
-    networks:
-      - app-bridge
-    ports:
-      - 46200-46250:46200-46250
     restart: unless-stopped
 
   dockermon:

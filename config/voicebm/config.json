@@ -1,0 +1,40 @@
+{
+  "mqtt": {
+    "broker": "localhost",
+    "port": 1883,
+    "user": "mqtt",
+    "pass": "we7VMNXYXpWgUfYWdNUdoW"
+  },
+  "paths": {
+    "voicebm_base": "/data",
+    "sherpa_bin": "/app/sherpa_embed.py",
+    "sherpa_model": "/data/models/nemo_en_titanet_small.onnx",
+    "enroll_dir": "/data/enroll",
+    "embeddings_dir": "/data/embeddings",
+    "recordings_dir": "/data/recordings",
+    "stt_requests_dir": "/data/stt_requests"
+  },
+  "thresholds": {
+    "passive_match": 0.22,
+    "active_match": 0.50
+  },
+  "wyoming_proxy": {
+    "port": 10301,
+    "upstream_uri": "tcp://localhost:10300",
+    "inject_speaker": false,
+    "analysis_timeout_seconds": 20
+  },
+  "dashboard": {
+    "port": 5055
+  },
+  "users": {
+    "gonzalo": {
+      "display_name": "Gonzalo",
+      "bermuda_sensor": "sensor.oneplus_7_pro_area_last_seen"
+    },
+    "irina": {
+      "display_name": "Irina",
+      "bermuda_sensor": "sensor.iphone_irina_area_last_seen"
+    }
+  }
+}
