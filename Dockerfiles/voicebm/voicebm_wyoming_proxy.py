@@ -35,12 +35,14 @@ import wave
 from pathlib import Path
 from typing import Optional
 
+import dataclasses
+
 import paho.mqtt.client as mqtt
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.asr import Transcribe, Transcript
 from wyoming.client import AsyncClient
 from wyoming.event import Event
-from wyoming.info import Describe
+from wyoming.info import Describe, Info
 from wyoming.server import AsyncEventHandler, AsyncServer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -51,6 +53,7 @@ _LOGGER = logging.getLogger("voicebm.proxy")
 # ---------------------------------------------------------------------------
 VOICEBM_WYOMING_PORT   = int(os.getenv("VOICEBM_WYOMING_PORT", "10301"))
 UPSTREAM_WYOMING_URI   = os.getenv("UPSTREAM_WYOMING_URI", "tcp://localhost:10300")
+VOICEBM_SERVICE_NAME   = os.getenv("VOICEBM_SERVICE_NAME", "voicebm")  # name shown in HA
 MQTT_BROKER            = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT              = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USER              = os.getenv("MQTT_USER", "")
@@ -169,14 +172,19 @@ class VoiceBMProxyHandler(AsyncEventHandler):
         Path(SHARED_AUDIO_DIR).mkdir(parents=True, exist_ok=True)
 
     async def handle_event(self, event: Event) -> bool:
-        # Forward Describe to real Parakeet so HA sees the real capabilities
+        # Forward Describe to real Parakeet, then rename programs to VOICEBM_SERVICE_NAME
         if Describe.is_type(event.type):
             try:
                 async with AsyncClient.from_uri(UPSTREAM_WYOMING_URI) as client:
                     await client.write_event(event)
                     info_event = await asyncio.wait_for(client.read_event(), timeout=10.0)
                     if info_event:
-                        await self.write_event(info_event)
+                        info = Info.from_event(info_event)
+                        renamed_asr = [
+                            dataclasses.replace(p, name=VOICEBM_SERVICE_NAME)
+                            for p in info.asr
+                        ]
+                        await self.write_event(dataclasses.replace(info, asr=renamed_asr).event())
             except Exception as exc:
                 _LOGGER.warning(f"Could not fetch upstream Info: {exc}")
             return True
