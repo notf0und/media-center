@@ -76,6 +76,7 @@ def _build_wyoming_info() -> Info:
             AsrProgram(
                 name="sherpa-onnx",
                 description="sherpa-onnx ASR",
+                version="1.0",
                 attribution=Attribution(
                     name="k2-fsa",
                     url="https://github.com/k2-fsa/sherpa-onnx",
@@ -85,6 +86,7 @@ def _build_wyoming_info() -> Info:
                     AsrModel(
                         name=_model_name,
                         description=_model_name,
+                        version="1.0",
                         attribution=Attribution(name="k2-fsa", url=""),
                         installed=True,
                         languages=[_language],
