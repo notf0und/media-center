@@ -15,6 +15,7 @@ WORKDIR /build/llama.cpp
 RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLAMA_NATIVE=ON \
+    -DBUILD_SHARED_LIBS=OFF \
     && cmake --build build -j$(nproc) --target llama-server
 
 # Stage 2: lean runtime image
