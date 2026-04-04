@@ -18,7 +18,7 @@ MODELS = {
     "cohere-transcribe": {
         "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2",
         "dir": "sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01",
-        "type": "whisper",
+        "type": "cohere_transcribe",
         "encoder": "encoder.int8.onnx",
         "decoder": "decoder.int8.onnx",
         "tokens": "tokens.txt",
@@ -80,57 +80,45 @@ def create_recognizer(
         )
 
     model_type = info["type"]
+    _LOGGER.info(f"Creating OfflineRecognizer: model={model_name}, language={language}, threads={num_threads}")
 
-    if model_type == "whisper":
-        encoder = os.path.join(model_dir, info["encoder"])
-        decoder = os.path.join(model_dir, info["decoder"])
-        tokens = os.path.join(model_dir, info["tokens"])
-        recognizer_config = sherpa_onnx.OfflineRecognizerConfig(
-            model=sherpa_onnx.OfflineModelConfig(
-                whisper=sherpa_onnx.OfflineWhisperModelConfig(
-                    encoder=encoder,
-                    decoder=decoder,
-                    language=language,
-                ),
-                tokens=tokens,
-                num_threads=num_threads,
-            ),
-            decoding_method="greedy_search",
+    if model_type == "cohere_transcribe":
+        return sherpa_onnx.OfflineRecognizer.from_cohere_transcribe(
+            encoder=os.path.join(model_dir, info["encoder"]),
+            decoder=os.path.join(model_dir, info["decoder"]),
+            tokens=os.path.join(model_dir, info["tokens"]),
+            language=language,
+            num_threads=num_threads,
+        )
+
+    elif model_type == "whisper":
+        return sherpa_onnx.OfflineRecognizer.from_whisper(
+            encoder=os.path.join(model_dir, info["encoder"]),
+            decoder=os.path.join(model_dir, info["decoder"]),
+            tokens=os.path.join(model_dir, info["tokens"]),
+            language=language,
+            task="transcribe",
+            num_threads=num_threads,
         )
 
     elif model_type == "nemo_ctc":
-        model_path = os.path.join(model_dir, info["model"])
-        tokens = os.path.join(model_dir, info["tokens"])
-        recognizer_config = sherpa_onnx.OfflineRecognizerConfig(
-            model=sherpa_onnx.OfflineModelConfig(
-                nemo_ctc=sherpa_onnx.OfflineNeMoCTCModelConfig(model=model_path),
-                tokens=tokens,
-                num_threads=num_threads,
-            ),
-            decoding_method="greedy_search",
+        return sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
+            model=os.path.join(model_dir, info["model"]),
+            tokens=os.path.join(model_dir, info["tokens"]),
+            num_threads=num_threads,
         )
 
     elif model_type == "sense_voice":
-        model_path = os.path.join(model_dir, info["model"])
-        tokens = os.path.join(model_dir, info["tokens"])
-        recognizer_config = sherpa_onnx.OfflineRecognizerConfig(
-            model=sherpa_onnx.OfflineModelConfig(
-                sense_voice=sherpa_onnx.OfflineSenseVoiceModelConfig(
-                    model=model_path,
-                    use_itn=True,
-                    language=language,
-                ),
-                tokens=tokens,
-                num_threads=num_threads,
-            ),
-            decoding_method="greedy_search",
+        return sherpa_onnx.OfflineRecognizer.from_sense_voice(
+            model=os.path.join(model_dir, info["model"]),
+            tokens=os.path.join(model_dir, info["tokens"]),
+            language=language,
+            use_itn=True,
+            num_threads=num_threads,
         )
 
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
-
-    _LOGGER.info(f"Creating OfflineRecognizer: model={model_name}, language={language}, threads={num_threads}")
-    return sherpa_onnx.OfflineRecognizer(recognizer_config)
 
 
 def download_model(model_name: str, base_dir: str) -> None:
