@@ -613,6 +613,14 @@ services:
       - HF_HOME=/data
       - PARAKEET_WYOMING_PORT=10300  # Wyoming protocol port for Home Assistant
       - PARAKEET_API_PORT=5052       # OpenAI API port for OpenWebUI
+      # ASR model — change value and restart the container to switch models.
+      # CPU RTFx benchmarks (higher = faster; source: onnx-asr benchmarks, Ryzen 7 9800X3D):
+      #   nemo-parakeet-ctc-0.6b      RTFx ~43  fastest on CPU — recommended
+      #   nemo-parakeet-tdt-0.6b-v3   RTFx ~35  previous default
+      #   nemo-parakeet-rnnt-0.6b     RTFx ~33  slightly slower
+      #   nemo-canary-1b-v2           RTFx  ~8  multilingual but much slower on CPU
+      # Note: do NOT add --quantization int8 for CTC — benchmarks show it is slower than float32.
+      - PARAKEET_MODEL=nemo-parakeet-ctc-0.6b
     volumes:
       - ./config/parakeet-asr:/data
     network_mode: host
@@ -638,6 +646,8 @@ services:
       - SHERPA_MODEL_NAME=nemo_en_titanet_small.onnx
       # VoiceBM data directory (mounted from host — holds model, enrollments, etc.)
       - VOICEBM_BASE=/data
+      # Host IP/hostname used to build audio playback URLs in the dashboard
+      - VOICEBM_HOST=192.168.1.2
       # Wyoming proxy — HA connects here instead of parakeet:10300
       - VOICEBM_WYOMING_PORT=10301
       # Name shown in HA when adding this Wyoming STT service
@@ -646,7 +656,7 @@ services:
       - UPSTREAM_WYOMING_URI=tcp://localhost:10300
       # Speaker injection: false = speaker only in MQTT sensor (recommended)
       #                    true  = prepend name to transcript ("Gonzalo: ...")
-      - VOICEBM_INJECT_SPEAKER=false
+      - VOICEBM_INJECT_SPEAKER=true
       - VOICEBM_ANALYSIS_TIMEOUT=20
       # Dashboard port — VoiceBM dashboard runs on port 5000 (hardcoded by VoiceBM)
       - VOICEBM_DASHBOARD_PORT=5000
@@ -659,6 +669,33 @@ services:
       - ./config/voicebm:/data
     network_mode: host
     restart: unless-stopped
+
+  # VibeVoice-ASR: Microsoft 7B-parameter LLM-based ASR for HA voice pipeline testing.
+  # ⚠  CPU-ONLY test service — first inference takes several minutes.
+  #    Model download is ~14 GB and cached in ./config/vibevoice-asr/hub.
+  # Home Assistant: add as Wyoming STT provider pointing at tcp://<host>:10302
+  # vibevoice-asr:
+  #   build:
+  #     context: ./Dockerfiles/vibevoice-asr
+  #     dockerfile: Dockerfile
+  #   container_name: vibevoice-asr
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #     - HF_HOME=/data                          # HuggingFace model cache
+  #     - VIBEVOICE_WYOMING_PORT=10302           # Wyoming protocol port for Home Assistant
+  #     - VIBEVOICE_API_PORT=5053                # OpenAI-compatible API port
+  #     - VIBEVOICE_MODEL=microsoft/VibeVoice-ASR
+  #     # bfloat16 is recommended for modern CPUs; switch to float32 if you hit issues
+  #     - VIBEVOICE_DTYPE=bfloat16
+  #     # sdpa works on CPU; do NOT change to flash_attention_2 (CUDA-only)
+  #     - VIBEVOICE_ATTN_IMPL=sdpa
+  #   volumes:
+  #     - ./config/vibevoice-asr:/data
+  #   network_mode: host
+  #   entrypoint: ["/bin/bash", "/data/start_services.sh"]
+  #   restart: unless-stopped
 
   # piper:
   #   image: rhasspy/wyoming-piper:latest
@@ -844,42 +881,146 @@ services:
       traefik.http.routers.ollama-https.tls: true
     restart: unless-stopped
 
-  llama-cpp:
-    # CPU-only is faster than Intel UHD 630 for this workload
-    # To enable Vulkan/GPU: change image to :server-vulkan and add --n-gpu-layers 33
-    image: ghcr.io/ggml-org/llama.cpp:server
-    container_name: llama-cpp
-    command: >
-      --model /models/model.gguf
-      --host 0.0.0.0
-      --port 8080
-      --ctx-size 2048
-      --threads 4
-      --parallel 1
-      --cont-batching
-      --timeout 600
+  # llama-cpp:
+  #   # CPU-only is faster than Intel UHD 630 for this workload
+  #   # To enable Vulkan/GPU: change image to :server-vulkan and add --n-gpu-layers 33
+  #   image: ghcr.io/ggml-org/llama.cpp:server
+  #   container_name: llama-cpp
+  #   command: >
+  #     --model /models/model.gguf
+  #     --host 0.0.0.0
+  #     --port 8080
+  #     --ctx-size 2048
+  #     --threads 4
+  #     --parallel 1
+  #     --cont-batching
+  #     --timeout 600
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   # Uncomment for Vulkan support (slower on Intel UHD 630)
+  #   # devices:
+  #   #   - /dev/dri/renderD128:/dev/dri/renderD128
+  #   volumes:
+  #     - ./config/llama-cpp/models:/models
+  #   networks:
+  #     - app-bridge
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.llama-cpp.rule: Host("llama") || Host("llama.test")
+  #     traefik.http.routers.llama-cpp.service: llama-cpp
+  #     traefik.http.routers.llama-cpp.entrypoints: web
+  #     traefik.http.services.llama-cpp.loadbalancer.server.port: 8080
+  #     traefik.http.routers.llama-cpp.middlewares: llama-cpp
+  #     traefik.http.middlewares.llama-cpp.redirectScheme.scheme: https
+  #     traefik.http.routers.llama-cpp-https.rule: Host("llama") || Host("llama.test")
+  #     traefik.http.routers.llama-cpp-https.entrypoints: websecure
+  #     traefik.http.routers.llama-cpp-https.tls: true
+  #   restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────────
+  # LOCAL REALTIME VOICE PIPELINE
+  # ─────────────────────────────────────────────────────────────
+
+  sherpa-onnx-asr:
+    build:
+      context: ./Dockerfiles/sherpa-onnx-asr
+      dockerfile: Dockerfile
+    container_name: sherpa-onnx-asr
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
-    # Uncomment for Vulkan support (slower on Intel UHD 630)
-    # devices:
-    #   - /dev/dri/renderD128:/dev/dri/renderD128
+      # Offline (batch) ASR model for Wyoming/HA and HTTP API.
+      # Models (change value and restart to switch):
+      #   cohere-transcribe       ~2.6 GB  14 languages  RTF ~0.14  (default, best accuracy)
+      #   nemo-parakeet-ctc-0.6b  ~300 MB  English       RTFx ~43   (fastest CPU)
+      #   whisper-small           ~240 MB  99 languages  good multilingual
+      #   sensevoice-small        ~250 MB  multi-lang    + emotion detection
+      - SHERPA_MODEL=cohere-transcribe
+      - SHERPA_LANGUAGE=en
+      - SHERPA_WYOMING_PORT=10303
+      - SHERPA_API_PORT=5054
+      - SHERPA_NUM_THREADS=4
     volumes:
-      - ./config/llama-cpp/models:/models
-    networks:
-      - app-bridge
-    labels:
-      traefik.enable: true
-      traefik.http.routers.llama-cpp.rule: Host("llama") || Host("llama.test")
-      traefik.http.routers.llama-cpp.service: llama-cpp
-      traefik.http.routers.llama-cpp.entrypoints: web
-      traefik.http.services.llama-cpp.loadbalancer.server.port: 8080
-      traefik.http.routers.llama-cpp.middlewares: llama-cpp
-      traefik.http.middlewares.llama-cpp.redirectScheme.scheme: https
-      traefik.http.routers.llama-cpp-https.rule: Host("llama") || Host("llama.test")
-      traefik.http.routers.llama-cpp-https.entrypoints: websecure
-      traefik.http.routers.llama-cpp-https.tls: true
+      - ./config/sherpa-onnx-asr:/data
+    network_mode: host
+    entrypoint: ["/bin/bash", "/data/start_services.sh"]
+    restart: unless-stopped
+
+  bonsai-llm:
+    build:
+      context: ./Dockerfiles/bonsai-llm
+      dockerfile: Dockerfile
+    container_name: bonsai-llm
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      # Bonsai 1.7B — 1-bit Q1_0_g128 quantized Qwen3 model (0.24 GB).
+      # Requires the prism-ml-llama.cpp fork (built into the image).
+      # API: OpenAI-compat /v1/chat/completions with streaming at port 8085.
+      - BONSAI_PORT=8085
+      - BONSAI_THREADS=4
+      - BONSAI_CTX_SIZE=8192
+      - BONSAI_PARALLEL=2
+      - BONSAI_MODEL_URL=https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B.gguf
+    volumes:
+      - ./config/bonsai-llm:/data
+    network_mode: host
+    entrypoint: ["/bin/bash", "/data/run.sh"]
+    restart: unless-stopped
+
+  local-voice-pipeline:
+    build:
+      context: ./Dockerfiles/local-voice-pipeline
+      dockerfile: Dockerfile
+    container_name: local-voice-pipeline
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      # WebSocket server — ESP32 connects here in realtime mode
+      - WEBSOCKET_HOST=0.0.0.0
+      - WEBSOCKET_PORT=8765
+      # Audio sample rates — must match ESPHome realtime package config:
+      #   cores3-satellite-realtime.yaml mic=16kHz, speaker=24kHz
+      - WEBSOCKET_INPUT_SAMPLE_RATE=16000    # mic sample rate (ESP32 → server)
+      - WEBSOCKET_OUTPUT_SAMPLE_RATE=24000   # TTS output rate (server → ESP32 speaker)
+      - TTS_SAMPLE_RATE=24000                # must match WEBSOCKET_OUTPUT_SAMPLE_RATE
+      # STT — streaming online recognizer (processes audio chunks as they arrive)
+      # Models: streaming-zipformer-small-en (default, ~65 MB), streaming-zipformer-en (~350 MB),
+      #         streaming-paraformer-zh-en (Chinese+English bilingual)
+      - STT_PROVIDER=sherpa-onnx-online
+      - STT_MODEL=streaming-zipformer-small-en
+      - STT_MODEL_DIR=/data/stt-models
+      - STT_LANGUAGE=en
+      - STT_NUM_THREADS=4
+      # LLM — bonsai (local prism-ml-llama.cpp) or ollama or openai
+      - LLM_PROVIDER=bonsai
+      - LLM_BASE_URL=http://localhost:8085/v1
+      - LLM_MODEL=Bonsai-1.7B
+      - LLM_API_KEY=not-needed
+      - LLM_TEMPERATURE=0.5
+      - LLM_MAX_TOKENS=256
+      # LLM_SYSTEM_PROMPT=   # leave empty to use built-in voice assistant prompt
+      # TTS — kokoro-http (existing service) or piper or openai-tts or elevenlabs
+      - TTS_PROVIDER=kokoro-http
+      - TTS_BASE_URL=http://localhost:5051
+      - TTS_VOICE=af_sky
+      - TTS_MODEL=kokoro
+      - TTS_API_KEY=not-needed
+      # Home Assistant integration (optional — enables smart home tool calls)
+      - HA_URL=http://localhost:8123
+      - HA_TOKEN=${HA_TOKEN:-}
+      # VAD tuning
+      - VAD_THRESHOLD=0.5
+      - VAD_SILENCE_DURATION_MS=600
+      - VAD_PREFIX_PADDING_MS=300
+    volumes:
+      - ./config/local-voice-pipeline:/data
+    network_mode: host
     restart: unless-stopped
 
   # plextraktsync:
