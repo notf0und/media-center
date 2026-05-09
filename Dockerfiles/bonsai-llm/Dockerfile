@@ -1,32 +1,34 @@
-# Stage 1: build prism-ml-llama.cpp
-FROM debian:bookworm AS builder
+# Stage 1: build ikawrakow/ik_llama.cpp
+# This fork has a merged AVX2-optimized Q1_0_G128 kernel (PR #1570) which gives
+# ~30-50 tok/s on a 6-core AVX2 i5-8500 vs ~0.2 tok/s from the old Mintplex scalar path.
+FROM ubuntu:22.04 AS builder
 
-RUN apt-get update && apt-get install -y \
-    git cmake make g++ wget \
+RUN apt-get update && apt-get install -yq \
+    build-essential git cmake libcurl4-openssl-dev curl libgomp1 wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone and build the Mintplex-Labs prism fork (branch: prism)
-# This fork adds Q1_0_g128 1-bit quantization CPU kernels
 WORKDIR /build
-RUN git clone --depth 1 -b prism \
-    https://github.com/Mintplex-Labs/prism-ml-llama.cpp.git llama.cpp
+RUN git clone --depth 1 https://github.com/ikawrakow/ik_llama.cpp.git llama.cpp
 
 WORKDIR /build/llama.cpp
 RUN cmake -B build \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DLLAMA_NATIVE=ON \
-    -DBUILD_SHARED_LIBS=OFF \
-    && cmake --build build -j$(nproc) --target llama-server
+    -DGGML_NATIVE=ON \
+    -DLLAMA_CURL=ON \
+    && cmake --build build --config Release -j$(nproc) --target llama-server
+
+# Collect all shared libraries produced by the build
+RUN mkdir -p /build/libs && find build -name "*.so" -exec cp {} /build/libs \;
 
 # Stage 2: lean runtime image
-FROM debian:bookworm-slim
+FROM ubuntu:22.04
 
-# Runtime dependencies for the compiled binary
-RUN apt-get update && apt-get install -y \
-    libgomp1 wget ca-certificates \
+RUN apt-get update && apt-get install -yq \
+    libgomp1 curl wget ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
+COPY --from=builder /build/libs/ /usr/local/lib/
+RUN ldconfig
 
 RUN mkdir -p /data
 

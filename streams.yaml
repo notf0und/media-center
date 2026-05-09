@@ -1,0 +1,34 @@
+- name: OTB Primorie
+  stream: https://ok.ru/video/3503444925978
+  port: 46203
+- name: 25 Regions
+  stream: https://ok.ru/videoembed/7930222354061
+  port: 46204
+- name: Friday.ru
+  stream: https://ok.ru/live/9313862491766
+  port: 46205
+- name: TodoNoticias.ar
+  stream: https://www.youtube.com/todonoticias/live
+  port: 46206
+- name: C5N.ar
+  stream: https://www.youtube.com/c/c5n/live
+  port: 46207
+- name: LN+.ar
+  stream: https://www.youtube.com/c/LaNacionMas/live
+  port: 46208
+- name: Neura Media
+  stream: https://www.youtube.com/@NeuraMedia/live
+  port: 46209
+- name: LUZU TV
+  stream: https://www.youtube.com/@luzutv/live
+  port: 46210
+- name: OLGA
+  stream: https://www.youtube.com/@olgaenvivo_/live
+  port: 46211
+- name: Blender
+  stream: https://www.youtube.com/@estoesblender/live
+  port: 46212
+- name: Муз-ТВ 
+  stream: https://glaz.tv/online-tv/muz-tv
+  port: 46213
+

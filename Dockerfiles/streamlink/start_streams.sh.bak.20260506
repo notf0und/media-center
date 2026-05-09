@@ -1,0 +1,115 @@
+#!/bin/bash
+
+# Function to remove quotes and trim whitespace from a string
+clean_string() {
+    echo "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//'
+}
+
+# Resolve ok.ru IPs, test TLS to each, and pin a working one in /etc/hosts
+pin_ok_ip() {
+    local ip
+    ip=$(python3 -c "
+import ssl, socket, sys
+
+host = 'ok.ru'
+port = 443
+timeout = 5
+
+try:
+    ips = list(set(i[4][0] for i in socket.getaddrinfo(host, port)))
+except Exception:
+    sys.exit(1)
+
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+for ip in ips:
+    try:
+        s = socket.socket()
+        s.settimeout(timeout)
+        s.connect((ip, port))
+        ss = ctx.wrap_socket(s, server_hostname=host)
+        ss.close()
+        print(ip)
+        sys.exit(0)
+    except Exception:
+        pass
+sys.exit(1)
+" 2>/dev/null)
+
+    # Remove any existing ok.ru hosts entries first
+    # (can't use sed -i on /etc/hosts in Docker — it's a mounted file, rename fails)
+    grep -v 'ok\.ru' /etc/hosts > /tmp/hosts.tmp && cat /tmp/hosts.tmp > /etc/hosts
+
+    if [[ -n "$ip" ]]; then
+        echo "Pinning ok.ru -> $ip in /etc/hosts"
+        echo "$ip ok.ru www.ok.ru" >> /etc/hosts
+    else
+        echo "Warning: no working IP for ok.ru — removing hosts pin, will rely on DNS" >&2
+    fi
+}
+
+# Launch a stream, restarting on failure for ok.ru (with IP re-pin)
+launch_stream() {
+    local name="$1"
+    local stream="$2"
+    local port="$3"
+
+    if [[ "$stream" != *"ok.ru"* ]]; then
+        # Non-ok.ru streams: one-shot in background
+        echo "Starting stream: $name on port $port"
+        streamlink "$stream" best --player-continuous-http --player-external-http-port "$port" --player-external-http --http-timeout 180 --retry-streams 300 --retry-max 0 --retry-open 1000 --http-header "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" &
+        return
+    fi
+
+    # ok.ru streams: proxy via warp sidecar, retry on failure with exponential backoff
+    (
+        delay=10
+        while true; do
+            echo "Starting ok.ru stream: $name on port $port (via warp proxy)"
+            streamlink "$stream" best --player-continuous-http --player-external-http-port "$port" --player-external-http --http-timeout 180 --retry-open 5 --http-proxy socks5://warp:1080 --http-no-ssl-verify --ringbuffer-size 64M --stream-segment-threads 3 --stream-segment-timeout 30 --stream-segment-attempts 5 --http-header "User-Agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            echo "Stream $name exited (code $?), restarting in ${delay}s..."
+            sleep "$delay"
+            [[ "$delay" -lt 300 ]] && delay=$((delay * 2))
+        done
+    ) &
+}
+
+# If streams.yaml is provided as an environment variable, create the file
+if [[ -n "$STREAMS_YAML_CONTENT" ]]; then
+    echo "Using streams from environment variable."
+    echo "$STREAMS_YAML_CONTENT" > /config/streams.yaml
+fi
+
+# Check if streams.yaml exists
+if [[ ! -f /config/streams.yaml ]]; then
+    echo "Error: No streams.yaml found in /config. Please provide a streams.yaml."
+    exit 1
+fi
+
+# Array to store job PIDs
+declare -a job_pids
+
+# Path to the YAML file
+yaml_file="/config/streams.yaml"
+
+# Read the YAML file and execute streamlink for each entry
+while IFS= read -r line; do
+    if [[ $line == "- name:"* ]]; then
+        name=$(clean_string "${line#*: }")
+        read -r line
+        stream=$(clean_string "${line#*: }")
+        read -r line
+        port=$(clean_string "${line#*: }")
+        
+        launch_stream "$name" "$stream" "$port"
+        job_pid=$!
+        job_pids+=($job_pid)
+        echo "Started stream for $name (PID: $job_pid)"
+    fi
+done < "$yaml_file"
+
+echo "All streams have been started."
+
+# Keep the container running by waiting for background jobs
+wait

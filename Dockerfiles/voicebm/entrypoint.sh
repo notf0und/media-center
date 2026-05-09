@@ -32,6 +32,7 @@ MQTT_BROKER="${MQTT_BROKER:-localhost}"
 MQTT_PORT="${MQTT_PORT:-1883}"
 MQTT_USER="${MQTT_USER:-}"
 MQTT_PASS="${MQTT_PASS:-}"
+VOICEBM_HOST="${VOICEBM_HOST:-localhost}"
 
 # ---------------------------------------------------------------------------
 # Ensure runtime directories exist
@@ -43,7 +44,18 @@ mkdir -p \
     "${DATA_DIR}/pending_active/recordings" \
     "${DATA_DIR}/meta" \
     "${MODELS_DIR}" \
-    "${DATA_DIR}/stt_requests"
+    "${DATA_DIR}/stt_requests" \
+    "${DATA_DIR}/bin"
+
+# Create the Sherpa embedding wrapper expected by voicebm_stt_service
+cat > "${DATA_DIR}/bin/embed_stt.sh" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+INPUT="\$1"
+OUTPUT="\$2"
+exec python3 /app/sherpa_embed.py --model "${SHERPA_MODEL}" --wav "\$INPUT" --out "\$OUTPUT"
+EOF
+chmod +x "${DATA_DIR}/bin/embed_stt.sh"
 
 # ---------------------------------------------------------------------------
 # Download chosen Sherpa-ONNX speaker recognition model (first run only)
@@ -71,6 +83,7 @@ fill_template() {
         -e "s|{MQTT_USER}|${MQTT_USER}|g" \
         -e "s|{MQTT_PASS}|${MQTT_PASS}|g" \
         -e "s|{CONDA_PATH}|/usr|g" \
+        -e "s|10\.50\.60\.58|${VOICEBM_HOST}|g" \
         "${src}" > "${dst}"
 }
 
@@ -85,6 +98,129 @@ fill_template "${GLOBAL_TMPL}/audio_server.py.template"            /app/audio_se
 
 [ -f "${GLOBAL_TMPL}/voicebm_dashboard.py.template" ] && \
     fill_template "${GLOBAL_TMPL}/voicebm_dashboard.py.template" /app/voicebm_dashboard.py
+
+# Patch dashboard: voicebm_stt_service writes pending.json as a plain array but
+# the dashboard's get_pending() expects {"entries": [...]}. Normalize on read.
+python3 - << 'PYEOF'
+import re, sys
+path = '/app/voicebm_dashboard.py'
+src = open(path).read()
+old = "    return load_json(PENDING_FILE, {'entries': []})"
+new = (
+    "    data = load_json(PENDING_FILE, {'entries': []})\n"
+    "    if isinstance(data, list):\n"
+    "        return {'entries': data}\n"
+    "    return data"
+)
+if old in src:
+    open(path, 'w').write(src.replace(old, new, 1))
+    print('[voicebm] Patched dashboard get_pending() for array format')
+else:
+    print('[voicebm] WARNING: dashboard patch target not found — skipping', file=sys.stderr)
+PYEOF
+
+# Patch dashboard: enroll_pending() and reject_pending() are stubs — replace them
+# with real implementations that delegate to voicebm_stt_service via MQTT.
+python3 - << 'PYEOF'
+import sys
+path = '/app/voicebm_dashboard.py'
+src = open(path).read()
+
+old_enroll = '''\
+@app.route('/api/pending/enroll', methods=['POST'])
+def enroll_pending():
+    """Enroll a pending voice"""
+    data = request.get_json()
+    pending_id = data.get('pending_id')
+    display_name = data.get('display_name', '').strip()
+    
+    if not pending_id or not display_name:
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    person_id = display_name.lower().replace(' ', '_')
+    
+    # TODO: Implement enrollment logic
+    # This would move files from pending_active/ to enroll/{person_id}/
+    
+    return jsonify({'success': True, 'person_id': person_id})'''
+
+new_enroll = '''\
+@app.route('/api/pending/enroll', methods=['POST'])
+def enroll_pending():
+    """Enroll a pending voice by delegating to voicebm_stt_service via MQTT."""
+    data = request.get_json()
+    pending_id = data.get('pending_id')
+    display_name = data.get('display_name', '').strip()
+
+    if not pending_id or not display_name:
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    person_id = display_name.lower().replace(' ', '_')
+
+    payload = json.dumps({
+        'id': pending_id,
+        'person_id': person_id,
+        'display_name': display_name,
+    })
+    try:
+        publish_to_mqtt('voicebm/pending_active/enroll', payload, qos=1, retain=False)
+        return jsonify({'success': True, 'person_id': person_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500'''
+
+old_reject = '''\
+@app.route('/api/pending/reject', methods=['POST'])
+def reject_pending():
+    """Reject a pending voice"""
+    data = request.get_json()
+    pending_id = data.get('pending_id')
+    
+    if not pending_id:
+        return jsonify({'error': 'Missing pending_id'}), 400
+    
+    # TODO: Implement rejection logic
+    # This would delete files from pending_active/
+    
+    return jsonify({'success': True})'''
+
+new_reject = '''\
+@app.route('/api/pending/reject', methods=['POST'])
+def reject_pending():
+    """Reject a pending voice by delegating to voicebm_stt_service via MQTT."""
+    data = request.get_json()
+    pending_id = data.get('pending_id')
+
+    if not pending_id:
+        return jsonify({'error': 'Missing pending_id'}), 400
+
+    try:
+        publish_to_mqtt('voicebm/pending_active/reject', json.dumps({'id': pending_id}), qos=1, retain=False)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500'''
+
+patched = src
+count = 0
+for old, new in [(old_enroll, new_enroll), (old_reject, new_reject)]:
+    if old in patched:
+        patched = patched.replace(old, new, 1)
+        count += 1
+
+open(path, 'w').write(patched)
+print(f'[voicebm] Patched {count}/2 enrollment stubs in dashboard')
+if count < 2:
+    print('[voicebm] WARNING: some enrollment patches not applied', file=sys.stderr)
+PYEOF
+
+# Patch dashboard: fix add_active_to_gallery (list vs dict + missing fields)
+python3 /app/dashboard_patches.py
+
+# Fix any stale hardcoded IPs in existing pending.json (from previous runs)
+PENDING_JSON="${DATA_DIR}/pending_active/pending.json"
+if [ -f "${PENDING_JSON}" ]; then
+    sed -i "s|10\.50\.60\.58|${VOICEBM_HOST}|g" "${PENDING_JSON}"
+    echo "[voicebm] Fixed audio URLs in pending.json"
+fi
 
 # ---------------------------------------------------------------------------
 # Start services in background (all configuration is env-driven)

@@ -1,1 +1,6 @@
 .env
+.aider*
+config/*
+downloads/*
+tmp/*
+**/__pycache__/

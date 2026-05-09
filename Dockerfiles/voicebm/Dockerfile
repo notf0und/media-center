@@ -36,6 +36,7 @@ RUN LATEST_URL=$(curl -fsSL https://api.github.com/repos/cybericebyte/VoiceBM/re
 # Copy our scripts (built into the image at build time)
 COPY voicebm_wyoming_proxy.py /app/voicebm_wyoming_proxy.py
 COPY entrypoint.sh /app/entrypoint.sh
+COPY dashboard_patches.py /app/dashboard_patches.py
 RUN chmod +x /app/entrypoint.sh
 
 # Data directory (mounted from host)

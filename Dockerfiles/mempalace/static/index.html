@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MemPalace - AI Memory System</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏛️ MemPalace</h1>
+            <p class="subtitle">Your AI Memory Palace - Never forget again</p>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="search">Search</button>
+            <button class="tab-btn" data-tab="palace">Palace</button>
+            <button class="tab-btn" data-tab="mine">Mine Data</button>
+            <button class="tab-btn" data-tab="status">Status</button>
+        </nav>
+
+        <!-- SEARCH TAB -->
+        <div id="search" class="tab-content active">
+            <div class="card">
+                <h2>Search the Palace</h2>
+                <div class="search-box">
+                    <input type="text" id="query" placeholder="What do you want to remember? e.g., 'office light setup'">
+                    <button onclick="searchPalace()">Search</button>
+                </div>
+                <div id="search-results" class="results"></div>
+            </div>
+        </div>
+
+        <!-- PALACE TAB -->
+        <div id="palace" class="tab-content">
+            <div class="card">
+                <h2>Palace Structure</h2>
+                <div class="palace-info">
+                    <div id="palace-status" class="loading">Loading palace structure...</div>
+                </div>
+
+                <div style="margin-top: 2rem;">
+                    <h3>Wake-Up Context</h3>
+                    <div class="form-group">
+                        <input type="text" id="wing-filter" placeholder="Optional: wing name (e.g., 'home_automation')">
+                        <button onclick="getWakeUp()">Get Context</button>
+                    </div>
+                    <div id="wake-up-context" class="results"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MINE TAB -->
+        <div id="mine" class="tab-content">
+            <div class="card">
+                <h2>Import Data Into Palace</h2>
+                
+                <div class="mine-section">
+                    <h3>Initialize Palace Structure</h3>
+                    <p class="help-text">Scan a directory to auto-detect wings (projects), halls, and rooms</p>
+                    <div class="form-group">
+                        <input type="text" id="init-dir" placeholder="/path/to/scan (e.g., /projects/my_app)">
+                        <button onclick="initPalace()">Initialize</button>
+                    </div>
+                    <div id="init-result" class="results"></div>
+                </div>
+
+                <hr>
+
+                <div class="mine-section">
+                    <h3>Folder Explorer</h3>
+                    <p class="help-text">Browse and select directories to mine</p>
+                    <div class="form-group">
+                        <input type="text" id="browse-path" placeholder="/path (e.g., /data)" value="/data">
+                        <input type="text" id="browse-filter" placeholder="Filter folders (optional)">
+                        <button onclick="browseFolders()">Browse</button>
+                    </div>
+                    <div id="browse-results" class="folder-list"></div>
+                </div>
+
+                <hr>
+
+                <div class="mine-section">
+                    <h3>Mine Data Into Palace</h3>
+                    <p class="help-text">Import projects or conversation logs</p>
+                    <div class="form-group">
+                        <input type="text" id="mine-dir" placeholder="/path/to/data">
+                        <select id="mine-mode">
+                            <option value="projects">Project Files</option>
+                            <option value="convos">Conversations</option>
+                        </select>
+                        <input type="text" id="mine-wing" placeholder="Wing name (optional, e.g., 'copilot')">
+                        <button onclick="minePalace()">Mine Data</button>
+                    </div>
+                    <div id="mine-result" class="results"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STATUS TAB -->
+        <div id="status" class="tab-content">
+            <div class="card">
+                <h2>Palace Status</h2>
+                <button onclick="getPalaceStatus()" class="btn-refresh">Refresh</button>
+                <button onclick="showDeleteConfirmation()" class="btn-danger">🗑️ Delete All Data</button>
+                <div id="palace-contents" class="results"></div>
+            </div>
+
+            <div class="card">
+                <h2>Service Info</h2>
+                <div id="service-info" class="results"></div>
+            </div>
+        </div>
+
+        <!-- Delete Confirmation Modal -->
+        <div id="delete-modal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <h2>⚠️ Delete All Mined Data</h2>
+                <p>This will permanently delete all files in the palace, including:</p>
+                <ul>
+                    <li>Knowledge graph database</li>
+                    <li>Vector embeddings</li>
+                    <li>All mined content</li>
+                </ul>
+                <p><strong>This action cannot be undone.</strong></p>
+                <div class="modal-buttons">
+                    <button onclick="closeDeleteConfirmation()" class="btn-cancel">Cancel</button>
+                    <button onclick="deletePalaceData()" class="btn-confirm-delete">Yes, Delete Everything</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>MemPalace <span id="footer-version">loading...</span> • <a href="https://github.com/MemPalace/mempalace" target="_blank">GitHub</a></p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

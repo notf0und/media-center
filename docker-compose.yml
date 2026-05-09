@@ -63,95 +63,95 @@ services:
 
   #   restart: unless-stopped
 
-  esphome:
-    image: esphome/esphome:latest
-    container_name: esphome
-    network_mode: host
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-      - VIRTUAL_HOST=esphome.test
+  # esphome:
+  #   image: esphome/esphome:latest
+  #   container_name: esphome
+  #   network_mode: host
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #     - VIRTUAL_HOST=esphome.test
 
-    volumes:
-      - ./config/esphome/config:/config
-      - /etc/localtime:/etc/localtime:ro
-      - /run/dbus:/run/dbus:ro
-    # devices: 
-    #   - /dev/serial/by-id/usb-Hades2001_M5stack_4552A3E012-if00-port0:/dev/ttyUSB1
-    labels:
-      traefik.enable: true
-      traefik.http.routers.esphome.rule: Host("esphome") || Host("esphome.test")
-      traefik.http.routers.esphome.service: esphome
-      traefik.http.routers.esphome.entrypoints: web
-      traefik.http.services.esphome.loadbalancer.server.port: 6052
+  #   volumes:
+  #     - ./config/esphome/config:/config
+  #     - /etc/localtime:/etc/localtime:ro
+  #     - /run/dbus:/run/dbus:ro
+  #   # devices: 
+  #   #   - /dev/serial/by-id/usb-Hades2001_M5stack_4552A3E012-if00-port0:/dev/ttyUSB1
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.esphome.rule: Host("esphome") || Host("esphome.test")
+  #     traefik.http.routers.esphome.service: esphome
+  #     traefik.http.routers.esphome.entrypoints: web
+  #     traefik.http.services.esphome.loadbalancer.server.port: 6052
 
-      traefik.http.routers.esphome.middlewares: esphome
-      traefik.http.middlewares.esphome.redirectScheme.scheme: https
+  #     traefik.http.routers.esphome.middlewares: esphome
+  #     traefik.http.middlewares.esphome.redirectScheme.scheme: https
 
-      traefik.http.routers.esphome-https.rule: Host("esphome") || Host("esphome.test")
-      traefik.http.routers.esphome-https.entrypoints: websecure
-      traefik.http.routers.esphome-https.tls: true
+  #     traefik.http.routers.esphome-https.rule: Host("esphome") || Host("esphome.test")
+  #     traefik.http.routers.esphome-https.entrypoints: websecure
+  #     traefik.http.routers.esphome-https.tls: true
 
-    restart: unless-stopped
+  #   restart: unless-stopped
 
-  homeassistant:
-    image: ghcr.io/home-assistant/home-assistant:stable
-    container_name: homeassistant
-    network_mode: host
-    privileged: true
-    dns:
-      - 192.168.10.5
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-      # - PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native
-      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-    # extra_hosts:
-      # - "host.docker.internal:host-gateway"
-    # devices:
-    #   - /dev/bus/usb/001/004:/dev/bus/usb/001/004
-    volumes:
-      - ./config/homeassistant:/config
-      - ./config/ssh:/root/.ssh:rw
-      - ./scripts/homeassistant/homeassistant-entrypoint.sh:/homeassistant-entrypoint.sh:ro
-      - /etc/localtime:/etc/localtime:ro
-      - /run/dbus:/run/dbus:ro
-      - /home/gonzalo/code/traefik/generate_certificates/root-certificates/root-ca.crt:/usr/local/share/ca-certificates/root-ca.crt:ro
+  # homeassistant:
+  #   image: ghcr.io/home-assistant/home-assistant:stable
+  #   container_name: homeassistant
+  #   network_mode: host
+  #   privileged: true
+  #   dns:
+  #     - 192.168.10.5
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #     # - PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native
+  #     - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+  #   # extra_hosts:
+  #     # - "host.docker.internal:host-gateway"
+  #   # devices:
+  #   #   - /dev/bus/usb/001/004:/dev/bus/usb/001/004
+  #   volumes:
+  #     - ./config/homeassistant:/config
+  #     - ./config/ssh:/root/.ssh:rw
+  #     - ./scripts/homeassistant/homeassistant-entrypoint.sh:/homeassistant-entrypoint.sh:ro
+  #     - /etc/localtime:/etc/localtime:ro
+  #     - /run/dbus:/run/dbus:ro
+  #     - /home/gonzalo/code/traefik/generate_certificates/root-certificates/root-ca.crt:/usr/local/share/ca-certificates/root-ca.crt:ro
 
-      # - /home/gonza/code/homeassistant/ha-contact-energy/custom_components/contact_energy:/config/custom_components/contact_energy
-      # - /home/gonza/code/homeassistant/hacs_waste_collection_schedule/custom_components/waste_collection_schedule:/config/custom_components/waste_collection_schedule
-      # - $HOME/.config/pulse/cookie:/root/.config/pulse/cookie
-      # - ${XDG_RUNTIME_DIR}/pulse/native:${XDG_RUNTIME_DIR}/pulse/native
-      # - /var/run/docker.sock:/var/run/docker.sock  # Add this line
-    entrypoint: ['/homeassistant-entrypoint.sh', '/init']
-    labels:
-      # Enable Traefik for this service
-      traefik.enable: true
+  #     # - /home/gonza/code/homeassistant/ha-contact-energy/custom_components/contact_energy:/config/custom_components/contact_energy
+  #     # - /home/gonza/code/homeassistant/hacs_waste_collection_schedule/custom_components/waste_collection_schedule:/config/custom_components/waste_collection_schedule
+  #     # - $HOME/.config/pulse/cookie:/root/.config/pulse/cookie
+  #     # - ${XDG_RUNTIME_DIR}/pulse/native:${XDG_RUNTIME_DIR}/pulse/native
+  #     # - /var/run/docker.sock:/var/run/docker.sock  # Add this line
+  #   entrypoint: ['/homeassistant-entrypoint.sh', '/init']
+  #   labels:
+  #     # Enable Traefik for this service
+  #     traefik.enable: true
 
-      # HTTP router configuration
-      traefik.http.routers.homeassistant.rule: (Host("homeassistant") || Host("homeassistant.test")) && !HeaderRegexp("User-Agent", "Mailpit/v.*")
-      traefik.http.routers.homeassistant.service: homeassistant
-      traefik.http.routers.homeassistant.entrypoints: web
-      traefik.http.routers.homeassistant.middlewares: homeassistant
-      traefik.http.services.homeassistant.loadbalancer.server.port: 8123
+  #     # HTTP router configuration
+  #     traefik.http.routers.homeassistant.rule: (Host("homeassistant") || Host("homeassistant.test")) && !HeaderRegexp("User-Agent", "Mailpit/v.*")
+  #     traefik.http.routers.homeassistant.service: homeassistant
+  #     traefik.http.routers.homeassistant.entrypoints: web
+  #     traefik.http.routers.homeassistant.middlewares: homeassistant
+  #     traefik.http.services.homeassistant.loadbalancer.server.port: 8123
 
-      # HTTP to HTTPS redirect middleware
-      traefik.http.middlewares.homeassistant.redirectScheme.scheme: https
+  #     # HTTP to HTTPS redirect middleware
+  #     traefik.http.middlewares.homeassistant.redirectScheme.scheme: https
 
-      # Create a separate HTTP router for Mailpit
-      traefik.http.routers.homeassistant-mailpit.rule: (Host("homeassistant") || Host("homeassistant.test")) && !HeaderRegexp("User-Agent", "Mailpit/v.*")
-      traefik.http.routers.homeassistant-mailpit.service: homeassistant
-      traefik.http.routers.homeassistant-mailpit.entrypoints: web
+  #     # Create a separate HTTP router for Mailpit
+  #     traefik.http.routers.homeassistant-mailpit.rule: (Host("homeassistant") || Host("homeassistant.test")) && !HeaderRegexp("User-Agent", "Mailpit/v.*")
+  #     traefik.http.routers.homeassistant-mailpit.service: homeassistant
+  #     traefik.http.routers.homeassistant-mailpit.entrypoints: web
 
-      # HTTPS router configuration
-      traefik.http.routers.homeassistant-https.rule: Host("homeassistant") || Host("homeassistant.test")
-      traefik.http.routers.homeassistant-https.entrypoints: websecure
-      traefik.http.routers.homeassistant-https.tls: true
-    group_add:
-      - audio
-    restart: unless-stopped
+  #     # HTTPS router configuration
+  #     traefik.http.routers.homeassistant-https.rule: Host("homeassistant") || Host("homeassistant.test")
+  #     traefik.http.routers.homeassistant-https.entrypoints: websecure
+  #     traefik.http.routers.homeassistant-https.tls: true
+  #   group_add:
+  #     - audio
+  #   restart: unless-stopped
 
   kavita:
     image: linuxserver/kavita:latest
@@ -181,81 +181,81 @@ services:
       # traefik.http.routers.kavita-https.middlewares: authentik-outpost@docker
     restart: unless-stopped
 
-  mqtt:
-    image: eclipse-mosquitto:latest
-    container_name: mqtt
-    network_mode: host
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    volumes:
-      - ./config/mqtt/config:/mosquitto/config
-      - ./config/mqtt/data:/mosquitto/data
-      - ./config/mqtt/log:/mosquitto/log
-    labels:
-      traefik.enable: true
-      traefik.http.routers.mqtt.rule: Host("mqtt") || Host("mqtt.test")
-      traefik.http.routers.mqtt.service: mqtt
-      traefik.http.routers.mqtt.entrypoints: web
-      traefik.http.services.mqtt.loadbalancer.server.port: 1883
+  # mqtt:
+  #   image: eclipse-mosquitto:latest
+  #   container_name: mqtt
+  #   network_mode: host
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   volumes:
+  #     - ./config/mqtt/config:/mosquitto/config
+  #     - ./config/mqtt/data:/mosquitto/data
+  #     - ./config/mqtt/log:/mosquitto/log
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.mqtt.rule: Host("mqtt") || Host("mqtt.test")
+  #     traefik.http.routers.mqtt.service: mqtt
+  #     traefik.http.routers.mqtt.entrypoints: web
+  #     traefik.http.services.mqtt.loadbalancer.server.port: 1883
 
-      traefik.http.routers.mqtt.middlewares: mqtt
-      traefik.http.middlewares.mqtt.redirectScheme.scheme: https
-      traefik.http.routers.mqtt-https.rule: Host("mqtt") || Host("mqtt.test")
-      traefik.http.routers.mqtt-https.entrypoints: websecure
-      traefik.http.routers.mqtt-https.tls: true
+  #     traefik.http.routers.mqtt.middlewares: mqtt
+  #     traefik.http.middlewares.mqtt.redirectScheme.scheme: https
+  #     traefik.http.routers.mqtt-https.rule: Host("mqtt") || Host("mqtt.test")
+  #     traefik.http.routers.mqtt-https.entrypoints: websecure
+  #     traefik.http.routers.mqtt-https.tls: true
 
-      traefik.http.routers.mqtt-ws.rule: Host("mqtt-ws") || Host("mqtt-ws.test")
-      traefik.http.routers.mqtt-ws.service: mqtt-ws
-      traefik.http.routers.mqtt-ws.entrypoints: web
-      traefik.http.services.mqtt-ws.loadbalancer.server.port: 9001
+  #     traefik.http.routers.mqtt-ws.rule: Host("mqtt-ws") || Host("mqtt-ws.test")
+  #     traefik.http.routers.mqtt-ws.service: mqtt-ws
+  #     traefik.http.routers.mqtt-ws.entrypoints: web
+  #     traefik.http.services.mqtt-ws.loadbalancer.server.port: 9001
 
-      traefik.http.routers.mqtt-ws.middlewares: mqtt-ws
-      traefik.http.middlewares.mqtt-ws.redirectScheme.scheme: https
-      traefik.http.routers.mqtt-ws-https.rule: Host("mqtt-ws") || Host("mqtt-ws.test")
-      traefik.http.routers.mqtt-ws-https.entrypoints: websecure
-      traefik.http.routers.mqtt-ws-https.tls: true
-      restart: unless-stopped
+  #     traefik.http.routers.mqtt-ws.middlewares: mqtt-ws
+  #     traefik.http.middlewares.mqtt-ws.redirectScheme.scheme: https
+  #     traefik.http.routers.mqtt-ws-https.rule: Host("mqtt-ws") || Host("mqtt-ws.test")
+  #     traefik.http.routers.mqtt-ws-https.entrypoints: websecure
+  #     traefik.http.routers.mqtt-ws-https.tls: true
+  #     restart: unless-stopped
 
-  music-assistant:
-    image: ghcr.io/music-assistant/server:latest
-    container_name: music-assistant
-    # Network mode must be set to host for MA to work correctly
-    network_mode: host
-    volumes:
-      - ./config/music-assistant/data:/data/
-      - ./scripts/music-assistant/music-assistant-entrypoint.sh:/mass-entrypoint.sh:ro
-      - /home/gonzalo/code/traefik/generate_certificates/root-certificates/root-ca.crt:/usr/local/share/ca-certificates/root-ca.crt:ro
-    # privileged caps (and security-opt) needed to mount smb folders within the container
-    cap_add:
-      - SYS_ADMIN
-      - DAC_READ_SEARCH
-    security_opt:
-      - apparmor:unconfined
-    environment:
-      # Provide logging level as environment variable.
-      # default=info, possible=(critical, error, warning, info, debug)
-      - LOG_LEVEL=info
-    entrypoint: ["/mass-entrypoint.sh"]
-    labels:
-      traefik.enable: true
-      traefik.http.routers.music-assistant.rule: Host("music-assistant") || Host("music-assistant.test")
-      traefik.http.routers.music-assistant.entrypoints: web
-      traefik.http.routers.music-assistant.service: music-assistant
-      traefik.http.services.music-assistant.loadbalancer.server.port: 8095
+  # music-assistant:
+  #   image: ghcr.io/music-assistant/server:latest
+  #   container_name: music-assistant
+  #   # Network mode must be set to host for MA to work correctly
+  #   network_mode: host
+  #   volumes:
+  #     - ./config/music-assistant/data:/data/
+  #     - ./scripts/music-assistant/music-assistant-entrypoint.sh:/mass-entrypoint.sh:ro
+  #     - /home/gonzalo/code/traefik/generate_certificates/root-certificates/root-ca.crt:/usr/local/share/ca-certificates/root-ca.crt:ro
+  #   # privileged caps (and security-opt) needed to mount smb folders within the container
+  #   cap_add:
+  #     - SYS_ADMIN
+  #     - DAC_READ_SEARCH
+  #   security_opt:
+  #     - apparmor:unconfined
+  #   environment:
+  #     # Provide logging level as environment variable.
+  #     # default=info, possible=(critical, error, warning, info, debug)
+  #     - LOG_LEVEL=info
+  #   entrypoint: ["/mass-entrypoint.sh"]
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.music-assistant.rule: Host("music-assistant") || Host("music-assistant.test")
+  #     traefik.http.routers.music-assistant.entrypoints: web
+  #     traefik.http.routers.music-assistant.service: music-assistant
+  #     traefik.http.services.music-assistant.loadbalancer.server.port: 8095
 
-      # traefik.http.routers.music-assistant.middlewares: music-assistant
-      # traefik.http.middlewares.music-assistant.redirectScheme.scheme: https
-      traefik.http.routers.music-assistant-https.rule: Host("music-assistant") || Host("music-assistant.test")
-      traefik.http.routers.music-assistant-https.entrypoints: websecure
-      traefik.http.routers.music-assistant-https.service: music-assistant
-      traefik.http.services.music-assistant-https.loadbalancer.server.port: 8095
+  #     # traefik.http.routers.music-assistant.middlewares: music-assistant
+  #     # traefik.http.middlewares.music-assistant.redirectScheme.scheme: https
+  #     traefik.http.routers.music-assistant-https.rule: Host("music-assistant") || Host("music-assistant.test")
+  #     traefik.http.routers.music-assistant-https.entrypoints: websecure
+  #     traefik.http.routers.music-assistant-https.service: music-assistant
+  #     traefik.http.services.music-assistant-https.loadbalancer.server.port: 8095
 
-      traefik.http.routers.music-assistant-https.tls: true
-    restart: unless-stopped
+  #     traefik.http.routers.music-assistant-https.tls: true
+  #   restart: unless-stopped
 
   # node-red:
   #   image: nodered/node-red
@@ -311,24 +311,25 @@ services:
     restart: unless-stopped
 
 
-  po-token:
-    image: brainicism/bgutil-ytdlp-pot-provider
-    container_name: po-token
-    network_mode: host
-    labels:
-      traefik.enable: true
-      traefik.http.routers.po-token.rule: Host("po-token") || Host("po-token.test")
-      traefik.http.routers.po-token.entrypoints: web
-      traefik.http.routers.po-token.service: po-token
-      traefik.http.services.po-token.loadbalancer.server.port: 4416
+  # #music assistant youtube token refresh
+  # po-token:
+  #   image: brainicism/bgutil-ytdlp-pot-provider
+  #   container_name: po-token
+  #   network_mode: host
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.po-token.rule: Host("po-token") || Host("po-token.test")
+  #     traefik.http.routers.po-token.entrypoints: web
+  #     traefik.http.routers.po-token.service: po-token
+  #     traefik.http.services.po-token.loadbalancer.server.port: 4416
 
-      traefik.http.routers.po-token.middlewares: po-token
-      traefik.http.middlewares.po-token.redirectScheme.scheme: https
-      traefik.http.routers.po-token-https.rule: Host("po-token") || Host("po-token.test")
-      traefik.http.routers.po-token-https.entrypoints: websecure
-      traefik.http.routers.po-token-https.tls: true
+  #     traefik.http.routers.po-token.middlewares: po-token
+  #     traefik.http.middlewares.po-token.redirectScheme.scheme: https
+  #     traefik.http.routers.po-token-https.rule: Host("po-token") || Host("po-token.test")
+  #     traefik.http.routers.po-token-https.entrypoints: websecure
+  #     traefik.http.routers.po-token-https.tls: true
 
-    restart: unless-stopped
+  #   restart: unless-stopped
 
   prowlarr:
     image: linuxserver/prowlarr:latest
@@ -523,44 +524,44 @@ services:
       traefik.http.routers.transmission-https.tls: true
     restart: unless-stopped
 
-  zigbee2mqtt:
-    image: koenkk/zigbee2mqtt:latest
-    container_name: zigbee2mqtt
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-    # dns:
-    #     - 192.168.10.5
-    group_add:
-      - dialout
-    user: 1000:1000
-    volumes:
-      - ./config/zigbee2mqtt:/app/data
-      - /run/udev:/run/udev:ro
-      - /home/shared/code/traefik/generate_certificates/root-certificates:/etc/ssl/root
-      - /home/shared/code/traefik/config/certificates:/etc/ssl/user
-    networks:
-      - app-bridge
-    devices:
-      - /dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_4e9d22083ab6ed11b30ad40ea8669f5d-if00-port0:/dev/ttyUSB0
-    labels:
-      traefik.enable: true
-      traefik.http.routers.zigbee2mqtt.rule: Host("zigbee2mqtt") || Host("zigbee2mqtt.test")
-      traefik.http.routers.zigbee2mqtt.service: zigbee2mqtt
-      traefik.http.routers.zigbee2mqtt.entrypoints: web
-      traefik.http.services.zigbee2mqtt.loadbalancer.server.port: 80
-      traefik.http.routers.zigbee2mqtt.middlewares: zigbee2mqtt
-      traefik.http.middlewares.zigbee2mqtt.redirectScheme.scheme: https
+  # zigbee2mqtt:
+  #   image: koenkk/zigbee2mqtt:latest
+  #   container_name: zigbee2mqtt
+  #   environment:
+  #     - PUID=${PUID}
+  #     - PGID=${PGID}
+  #     - TZ=${TZ}
+  #   # dns:
+  #   #     - 192.168.10.5
+  #   group_add:
+  #     - dialout
+  #   user: 1000:1000
+  #   volumes:
+  #     - ./config/zigbee2mqtt:/app/data
+  #     - /run/udev:/run/udev:ro
+  #     - /home/shared/code/traefik/generate_certificates/root-certificates:/etc/ssl/root
+  #     - /home/shared/code/traefik/config/certificates:/etc/ssl/user
+  #   networks:
+  #     - app-bridge
+  #   devices:
+  #     - /dev/serial/by-id/usb-ITead_Sonoff_Zigbee_3.0_USB_Dongle_Plus_4e9d22083ab6ed11b30ad40ea8669f5d-if00-port0:/dev/ttyUSB0
+  #   labels:
+  #     traefik.enable: true
+  #     traefik.http.routers.zigbee2mqtt.rule: Host("zigbee2mqtt") || Host("zigbee2mqtt.test")
+  #     traefik.http.routers.zigbee2mqtt.service: zigbee2mqtt
+  #     traefik.http.routers.zigbee2mqtt.entrypoints: web
+  #     traefik.http.services.zigbee2mqtt.loadbalancer.server.port: 80
+  #     traefik.http.routers.zigbee2mqtt.middlewares: zigbee2mqtt
+  #     traefik.http.middlewares.zigbee2mqtt.redirectScheme.scheme: https
 
-      traefik.http.routers.zigbee2mqtt-https.rule: Host("zigbee2mqtt") || Host("zigbee2mqtt.test")
-      traefik.http.routers.zigbee2mqtt-https.entrypoints: websecure 
-      traefik.http.routers.zigbee2mqtt-https.tls: true
-      traefik.http.routers.zigbee2mqtt-https.middlewares: authentik-outpost@docker
+  #     traefik.http.routers.zigbee2mqtt-https.rule: Host("zigbee2mqtt") || Host("zigbee2mqtt.test")
+  #     traefik.http.routers.zigbee2mqtt-https.entrypoints: websecure 
+  #     traefik.http.routers.zigbee2mqtt-https.tls: true
+  #     traefik.http.routers.zigbee2mqtt-https.middlewares: authentik-outpost@docker
 
-    depends_on:
-      - mqtt
-    restart: unless-stopped
+  #   depends_on:
+  #     - mqtt
+  #   restart: unless-stopped
   # ntopng:
   #   image: ntop/ntopng.dev:latest
   #   container_name: ntopng
@@ -716,12 +717,14 @@ services:
       dockerfile: Dockerfile
     container_name: kokoro-tts
     environment:
+      - HF_TOKEN=${HF_TOKEN:-}
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
       - KOKORO_WYOMING_PORT=10210  # Wyoming protocol port for Home Assistant
       - KOKORO_API_PORT=5051       # OpenAI API port for OpenWebUI
       - KOKORO_SPEED=1.0           # Speech speed multiplier (0.5-2.0)
+      - KOKORO_OUTPUT_SAMPLE_RATE=48000  # Resample output to 48kHz for ESP32 (native: 24kHz)
     volumes:
       - ./config/kokoro:/data
     network_mode: host
@@ -737,8 +740,9 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
-      - SUPERTONIC_STEPS=30        # Denoising steps (1-10, lower=faster but lower quality)
+      - SUPERTONIC_STEPS=60        # Denoising steps (1-10, lower=faster but lower quality)
       - SUPERTONIC_SPEED=1.30      # Speech speed multiplier (0.5-2.0)
+      - SUPERTONIC_WYOMING_PORT=10500  # Wyoming protocol port for Home Assistant / streaming_tts_proxy
       - OPENAI_API_PORT=5050       # OpenAI API port for OpenWebUI
     volumes:
       - ./config/supertonic:/config
@@ -747,19 +751,103 @@ services:
     entrypoint: ["/bin/bash", "/config/start_services.sh"]
     restart: unless-stopped
 
+  omnivoice-tts:
+    build:
+      context: ./Dockerfiles/omnivoice-tts
+      dockerfile: Dockerfile
+    container_name: omnivoice-tts
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - OMNIVOICE_WYOMING_PORT=10211   # Wyoming protocol port for Home Assistant
+      - OMNIVOICE_API_PORT=5055        # HTTP API port for the custom streaming integration
+      - OMNIVOICE_DEVICE=cpu           # Use "cuda:0" if a GPU is available
+      - OMNIVOICE_NUM_THREADS=6        # torch CPU threads (tune to available cores)
+      - HF_TOKEN=${HF_TOKEN:-}         # Optional: set in .env for higher HF rate limits
+      # Voice preset: auto | female_american | male_american | female_british | male_british | design
+      - OMNIVOICE_DEFAULT_VOICE=female_american
+      # Instruction used when DEFAULT_VOICE=design (or when API caller requests "design")
+      - OMNIVOICE_VOICE_INSTRUCTION=female, american accent
+      # Diffusion steps: 8=fastest, 16=fast+recommended, 32=higher quality
+      - OMNIVOICE_NUM_STEPS=8
+      - OMNIVOICE_SPEED=1.0
+    volumes:
+      - ./config/omnivoice-tts:/data   # scripts + model cache (HF_HOME=/data/models)
+    network_mode: host
+    entrypoint: ["/bin/bash", "/data/start_services.sh"]
+    restart: unless-stopped
+
+  kitten-tts:
+    build:
+      context: ./Dockerfiles/kitten-tts
+      dockerfile: Dockerfile
+    container_name: kitten-tts
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - KITTEN_WYOMING_PORT=10212       # Wyoming protocol port for Home Assistant / streaming_tts_proxy
+      - KITTEN_MODEL=KittenML/kitten-tts-mini-0.8  # nano-0.8-int8 (25MB) | nano-0.8 (56MB) | micro-0.8 (41MB) | mini-0.8 (80MB)
+      - KITTEN_DEFAULT_VOICE=Bella      # Bella | Jasper | Luna | Bruno | Rosie | Hugo | Kiki | Leo
+      - KITTEN_SPEED=1.0                # Speech speed multiplier (0.5–2.0)
+      - HF_TOKEN=${HF_TOKEN:-}          # Optional: set in .env for higher HF rate limits
+    volumes:
+      - ./config/kitten-tts:/data       # scripts + model cache
+    network_mode: host
+    entrypoint: ["/bin/bash", "/data/start_services.sh"]
+    restart: unless-stopped
+
+  pocket-tts:
+    build:
+      context: ./Dockerfiles/pocket-tts
+      dockerfile: Dockerfile
+    container_name: pocket-tts
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - POCKET_TTS_WYOMING_PORT=10213       # Wyoming protocol port for Home Assistant / streaming_tts_proxy
+      - POCKET_TTS_VOICE=alba               # Default voice: alba | marius | javert | jean | fantine | cosette | eponine | azelma
+      - POCKET_TTS_ZEROCONF=pocket-tts      # mDNS service name for HA auto-discovery; set empty to disable
+      - POCKET_TTS_VOLUME=1.5               # Output gain multiplier (1.0=normal, 1.5=+50%, 2.0=double)
+      - HF_HOME=/data/models                # Model + voice wav cache directory
+      - HF_TOKEN=${HF_TOKEN:-}              # Optional: set in .env for higher HF rate limits
+      # Sacrificial prefix tunables (adjusts how the "... " prefix silence is trimmed)
+      # - PREFIX_MIN_DURATION=0.15          # Min seconds before searching for silence gap
+      # - PREFIX_MAX_DURATION=1.0           # Max seconds to search for prefix end
+      # - PREFIX_SILENCE_GAP=0.08           # Min silence duration (seconds) to identify gap
+    volumes:
+      - ./config/pocket-tts:/data           # scripts + model/voice cache
+    network_mode: host
+    entrypoint: ["/bin/bash", "/data/start_services.sh"]
+    restart: unless-stopped
+
   streamlink:
     build:
       context: ./Dockerfiles/streamlink # The directory containing the Dockerfile
       dockerfile: ./Dockerfile # Path to the Dockerfile (relative to the context)
     # image: streamlink-latest:latest # Tag for the built image
     container_name: streamlink
-    network_mode: host
-    # networks:
-    #   - app-bridge
-    # ports:
-    #   - 46200-46250:46200-46250
+    networks:
+      - app-bridge
+    ports:
+      - 46200-46250:46200-46250
+    dns:
+      - 192.168.10.5 # pihole DNS
     volumes:
       - ./streams.yaml:/config/streams.yaml # Mount the streams.yaml file
+    restart: unless-stopped
+
+  warp:
+    image: caomingjun/warp
+    container_name: warp
+    cap_add:
+      - NET_ADMIN
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=0
+    networks:
+      - app-bridge
     restart: unless-stopped
 
   dockermon:
@@ -850,6 +938,48 @@ services:
       traefik.http.routers.mailpit-https.tls: true
     restart: unless-stopped
 
+  mempalace:
+    build:
+      context: ./Dockerfiles/mempalace
+      dockerfile: Dockerfile
+    container_name: mempalace
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ}
+      - PALACE_DIR=/data/palace
+      - CMD_TIMEOUT=600
+    volumes:
+      - ./config/mempalace/palace:/data/palace
+      - ./config/mempalace:/data
+      - /home/gonzalo/.copilot/session-state/:/data/copilot-sessions:ro
+    networks:
+      - app-bridge
+    labels:
+      traefik.enable: true
+      # Web UI (Flask on port 5000)
+      traefik.http.routers.mempalace.rule: Host("mempalace") || Host("mempalace.test")
+      traefik.http.routers.mempalace.entrypoints: web
+      traefik.http.routers.mempalace.service: mempalace
+      traefik.http.routers.mempalace.middlewares: mempalace
+      traefik.http.services.mempalace.loadbalancer.server.port: 5000
+      traefik.http.middlewares.mempalace.redirectScheme.scheme: https
+
+      traefik.http.routers.mempalace-https.rule: Host("mempalace") || Host("mempalace.test")
+      traefik.http.routers.mempalace-https.entrypoints: websecure
+      traefik.http.routers.mempalace-https.tls: true
+      
+      # MCP HTTP endpoint (same Flask container, but separate path routing)
+      traefik.http.routers.mempalace-mcp.rule: (Host("mempalace") || Host("mempalace.test")) && Path("/mcp")
+      traefik.http.routers.mempalace-mcp.entrypoints: web
+      traefik.http.routers.mempalace-mcp.service: mempalace
+      traefik.http.routers.mempalace-mcp.middlewares: mempalace-mcp
+      traefik.http.middlewares.mempalace-mcp.redirectScheme.scheme: https
+
+      traefik.http.routers.mempalace-mcp-https.rule: (Host("mempalace") || Host("mempalace.test")) && Path("/mcp")
+      traefik.http.routers.mempalace-mcp-https.entrypoints: websecure
+      traefik.http.routers.mempalace-mcp-https.tls: true
+    restart: unless-stopped
 
 
 
@@ -959,10 +1089,12 @@ services:
       - PGID=${PGID}
       - TZ=${TZ}
       # Bonsai 1.7B — 1-bit Q1_0_g128 quantized Qwen3 model (0.24 GB).
-      # Requires the prism-ml-llama.cpp fork (built into the image).
+      # Built with ikawrakow/ik_llama.cpp which has AVX2-optimised Q1_0_G128 kernels
+      # (PR #1570). Expect ~30-50 tok/s on a 6-core i5-8500 vs ~0.2 tok/s with old fork.
       # API: OpenAI-compat /v1/chat/completions with streaming at port 8085.
       - BONSAI_PORT=8085
-      - BONSAI_THREADS=4
+      - BONSAI_THREADS=6
+      # 8192 tokens needed for tool schemas (~1600 tokens) + system prompt + conversation
       - BONSAI_CTX_SIZE=8192
       - BONSAI_PARALLEL=2
       - BONSAI_MODEL_URL=https://huggingface.co/prism-ml/Bonsai-1.7B-gguf/resolve/main/Bonsai-1.7B.gguf
@@ -987,40 +1119,75 @@ services:
       # Audio sample rates — must match ESPHome realtime package config:
       #   cores3-satellite-realtime.yaml mic=16kHz, speaker=24kHz
       - WEBSOCKET_INPUT_SAMPLE_RATE=16000    # mic sample rate (ESP32 → server)
-      - WEBSOCKET_OUTPUT_SAMPLE_RATE=24000   # TTS output rate (server → ESP32 speaker)
-      - TTS_SAMPLE_RATE=24000                # must match WEBSOCKET_OUTPUT_SAMPLE_RATE
+      - WEBSOCKET_OUTPUT_SAMPLE_RATE=48000   # TTS output rate (server → ESP32 speaker)
+      - TTS_SAMPLE_RATE=48000                # must match WEBSOCKET_OUTPUT_SAMPLE_RATE
       # STT — streaming online recognizer (processes audio chunks as they arrive)
-      # Models: streaming-zipformer-small-en (default, ~65 MB), streaming-zipformer-en (~350 MB),
+      # Models: streaming-zipformer-en (~350 MB, default, k2 English transducer),
+      #         streaming-zipformer-small-en (~65 MB, faster/lower accuracy),
       #         streaming-paraformer-zh-en (Chinese+English bilingual)
+      #         parakeet-tdt-110m (~430 MB) - NeMo English, requires window_size metadata (experimental)
       - STT_PROVIDER=sherpa-onnx-online
-      - STT_MODEL=streaming-zipformer-small-en
+      - STT_MODEL=streaming-zipformer-en
       - STT_MODEL_DIR=/data/stt-models
       - STT_LANGUAGE=en
       - STT_NUM_THREADS=4
-      # LLM — bonsai (local prism-ml-llama.cpp) or ollama or openai
-      - LLM_PROVIDER=bonsai
-      - LLM_BASE_URL=http://localhost:8085/v1
-      - LLM_MODEL=Bonsai-1.7B
+      # LLM — switch backend by changing these three vars (no rebuild needed):
+      #
+      #   bonsai (ik_llama.cpp, ultra-fast 1.7B CPU model):
+      #     LLM_PROVIDER=bonsai  LLM_BASE_URL=http://localhost:8085/v1  LLM_MODEL=Bonsai-1.7B
+      #     LLM_TEMPERATURE=0.1  LLM_MAX_TOKENS=150  (keep low — small model)
+      #     (leave SYSTEM_PROMPT_FILE empty to use the built-in concise voice prompt)
+      #
+      #   ollama (any model pulled with `ollama pull`):
+      #     LLM_PROVIDER=ollama  LLM_BASE_URL=https://ollama.test/v1  LLM_MODEL=gpt-oss:120b-cloud
+      #     LLM_TEMPERATURE=0.3  LLM_MAX_TOKENS=256
+      #     SYSTEM_PROMPT_FILE=/data/prompts/jarvis.md  (Jarvis-style voice prompt)
+      #
+      #   openai / any OpenAI-compatible API:
+      #     LLM_PROVIDER=openai-compat  LLM_BASE_URL=https://api.openai.com/v1  LLM_MODEL=gpt-4o-mini
+      #     LLM_API_KEY=sk-...
+      #
+      - LLM_PROVIDER=ollama
+      - LLM_BASE_URL=http://localhost:11434/v1
+      - LLM_MODEL=gpt-oss:120b-cloud
       - LLM_API_KEY=not-needed
-      - LLM_TEMPERATURE=0.5
+      - LLM_TEMPERATURE=0.3
       - LLM_MAX_TOKENS=256
-      # LLM_SYSTEM_PROMPT=   # leave empty to use built-in voice assistant prompt
+      # System prompt: point to a .md file to use a file-based prompt (editable without rebuild).
+      # Leave empty to fall back to LLM_SYSTEM_PROMPT env var, or the built-in default.
+      - SYSTEM_PROMPT_FILE=/data/prompts/jarvis.md
+      # LLM_SYSTEM_PROMPT=   # inline prompt (ignored when SYSTEM_PROMPT_FILE is set)
       # TTS — kokoro-http (existing service) or piper or openai-tts or elevenlabs
       - TTS_PROVIDER=kokoro-http
-      - TTS_BASE_URL=http://localhost:5051
+      - TTS_BASE_URL=http://localhost:5051/v1
       - TTS_VOICE=af_sky
       - TTS_MODEL=kokoro
       - TTS_API_KEY=not-needed
-      # Home Assistant integration (optional — enables smart home tool calls)
+      # Home Assistant integration — MCP tools (preferred) or direct HA REST (fallback)
+      # MCP_SERVER_URL: set to your ha-mcp server endpoint to enable all 88 HA tools.
+      # MCP_TOOLS: comma-separated list of tools to expose (keep short for small models).
+      # MCP_SSL_VERIFY: root CA is installed at boot, so trusted certs work with true.
+      - MCP_SERVER_URL=https://ha-mcp.test/mcp
+      - MCP_TOOLS=ha_search_entities,ha_get_state,ha_call_service,ha_bulk_control
+      - MCP_SSL_VERIFY=true
+      # HA_TOKEN is only used when MCP_SERVER_URL is empty (direct REST API fallback).
       - HA_URL=http://localhost:8123
       - HA_TOKEN=${HA_TOKEN:-}
+      # SSL — root CA installed at boot so https://ollama.test and https://ha-mcp.test are trusted
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
       # VAD tuning
-      - VAD_THRESHOLD=0.5
-      - VAD_SILENCE_DURATION_MS=600
-      - VAD_PREFIX_PADDING_MS=300
+      - VAD_CONFIDENCE=0.15
+      - VAD_MIN_VOLUME=0.01
+      - VAD_START_SECS=0
+      - VAD_STOP_SECS=0.3
+      - SESSION_TIMEOUT_SECS=30
     volumes:
       - ./config/local-voice-pipeline:/data
+      - ./scripts/local-voice-pipeline/entrypoint.sh:/entrypoint.sh:ro
+      - /home/gonzalo/code/traefik/generate_certificates/root-certificates/root-ca.crt:/usr/local/share/ca-certificates/root-ca.crt:ro
     network_mode: host
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    command: ["python", "-m", "app.main"]
     restart: unless-stopped
 
   # plextraktsync:

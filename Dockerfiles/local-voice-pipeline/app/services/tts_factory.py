@@ -1,7 +1,13 @@
-import os, logging, openai
+import os, logging
 from pipecat.services.openai import OpenAITTSService
+import pipecat.services.openai.tts as _openai_tts
 
 logger = logging.getLogger(__name__)
+
+def _register_voice(voice: str):
+    """Add a non-standard voice (e.g. kokoro) to pipecat's VALID_VOICES dict."""
+    if voice not in _openai_tts.VALID_VOICES:
+        _openai_tts.VALID_VOICES[voice] = voice  # type: ignore[assignment]
 
 def create_tts_service():
     provider = os.environ.get("TTS_PROVIDER", "kokoro-http")
@@ -14,9 +20,10 @@ def create_tts_service():
         api_key = os.environ.get("TTS_API_KEY", "not-needed")
         voice = os.environ.get("TTS_VOICE", "af_sky")
         model = os.environ.get("TTS_MODEL", "kokoro")
-        client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
+        _register_voice(voice)
         return OpenAITTSService(
-            client=client,
+            api_key=api_key,
+            base_url=base_url,
             voice=voice,
             model=model,
             sample_rate=sample_rate,

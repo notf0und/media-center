@@ -9,7 +9,7 @@ def create_stt_service():
     if provider == "sherpa-onnx-online":
         from .sherpa_onnx_online_stt import SherpaOnnxOnlineSTTService
         return SherpaOnnxOnlineSTTService(
-            model_name=os.environ.get("STT_MODEL", "streaming-zipformer-small-en"),
+            model_name=os.environ.get("STT_MODEL", "streaming-zipformer-en"),
             model_dir=os.environ.get("STT_MODEL_DIR", "/data/stt-models"),
             num_threads=int(os.environ.get("STT_NUM_THREADS", 4)),
             language=os.environ.get("STT_LANGUAGE", "en"),
