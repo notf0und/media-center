@@ -1,54 +1,24 @@
 #!/bin/bash
-# VoiceBM Entrypoint
-# ==================
-# All runtime settings are read from environment variables and stored in /data/config.json
-# Configuration is applied on every container start, so changes are applied immediately:
-#   docker-compose up -d --force-recreate voicebm
-#
-# Available Sherpa-ONNX speaker recognition models (set SHERPA_MODEL_NAME):
-#
-#   English models (recommended for English-speaking households):
-#     nemo_en_titanet_small.onnx          (~38 MB)  - Default, VoiceBM recommended
-#     nemo_en_titanet_large.onnx          (~97 MB)  - Higher accuracy, more RAM
-#     nemo_en_speakerverification_speakernet.onnx (~22 MB) - Smallest NeMo
-#     wespeaker_en_voxceleb_CAM++.onnx    (~28 MB)  - WeSpeaker CAM++
-#     wespeaker_en_voxceleb_CAM++_LM.onnx (~28 MB)  - WeSpeaker CAM++ with LM
-#     wespeaker_en_voxceleb_resnet152_LM.onnx (~75 MB)
-#     wespeaker_en_voxceleb_resnet221_LM.onnx (~91 MB)
-#     wespeaker_en_voxceleb_resnet293_LM.onnx (~109 MB) - Largest/most accurate
-#     3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx (~28 MB)
-#     3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx (~25 MB)
-#
-#   Bilingual Chinese+English:
-#     3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx (~27 MB)
-#
-# All models are downloaded from:
-#   https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models
 set -e
 
-DATA_DIR="/data"  # hardcoded, always /data (mounted from host via volumes)
+DATA_DIR="${VOICEBM_BASE:-/data}"
 MODELS_DIR="${DATA_DIR}/models"
-STT_MODELS_DIR="${DATA_DIR}/stt-models"
-
-# Export for config_generator.py
-export DATA_DIR
-
-# Set defaults for environment variables
 SHERPA_MODEL_NAME="${SHERPA_MODEL_NAME:-nemo_en_titanet_small.onnx}"
 SHERPA_MODEL="${SHERPA_MODEL:-${MODELS_DIR}/${SHERPA_MODEL_NAME}}"
 MQTT_BROKER="${MQTT_BROKER:-localhost}"
 MQTT_PORT="${MQTT_PORT:-1883}"
 MQTT_USER="${MQTT_USER:-}"
 MQTT_PASS="${MQTT_PASS:-}"
-VOICEBM_ENABLED="${VOICEBM_ENABLED:-true}"
+VOICEBM_HOST="${VOICEBM_HOST:-localhost}"
 
-# Embedded STT configuration
+# STT config
 VOICEBM_STT_MODEL="${VOICEBM_STT_MODEL:-cohere-transcribe}"
 VOICEBM_STT_LANGUAGE="${VOICEBM_STT_LANGUAGE:-en}"
 VOICEBM_STT_THREADS="${VOICEBM_STT_THREADS:-4}"
+STT_MODELS_DIR="${DATA_DIR}/stt-models"
 
 # ---------------------------------------------------------------------------
-# Ensure runtime directories exist with proper permissions
+# Ensure runtime directories exist
 # ---------------------------------------------------------------------------
 mkdir -p \
     "${DATA_DIR}/enroll" \
@@ -57,14 +27,19 @@ mkdir -p \
     "${DATA_DIR}/pending_active/recordings" \
     "${DATA_DIR}/meta" \
     "${MODELS_DIR}" \
-    "${STT_MODELS_DIR}" \
     "${DATA_DIR}/stt_requests" \
-    "${DATA_DIR}/bin"
+    "${DATA_DIR}/bin" \
+    "${STT_MODELS_DIR}"
 
-# Set directories to 755 so they're readable/traversable
-chmod -R 755 "${DATA_DIR}" 2>/dev/null || true
-
-echo "[voicebm] Services will run as root (container user)"
+# Create the Sherpa embedding wrapper
+cat > "${DATA_DIR}/bin/embed_stt.sh" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+INPUT="\$1"
+OUTPUT="\$2"
+exec python3 /app/sherpa_embed.py --model "${SHERPA_MODEL}" --wav "\$INPUT" --out "\$OUTPUT"
+EOF
+chmod +x "${DATA_DIR}/bin/embed_stt.sh"
 
 # ---------------------------------------------------------------------------
 # Generate or update config.json from environment variables
@@ -72,22 +47,18 @@ echo "[voicebm] Services will run as root (container user)"
 echo "[voicebm] Configuring VoiceBM from environment variables..."
 python3 /app/config_generator.py
 
-# Load audio_base_url from config for template substitution
-AUDIO_BASE_URL=$(python3 -c "import json; config = json.load(open('${DATA_DIR}/config.json')); print(config.get('audio_server', {}).get('base_url', 'http://10.50.60.58:9090'))" 2>/dev/null || echo "http://10.50.60.58:9090")
-echo "[voicebm] Audio base URL: ${AUDIO_BASE_URL}"
-
 # ---------------------------------------------------------------------------
-# Download chosen Sherpa-ONNX speaker recognition model (first run only)
+# Download Sherpa-ONNX speaker recognition model (first run only)
 # ---------------------------------------------------------------------------
 if [ ! -f "${SHERPA_MODEL}" ]; then
-    echo "[voicebm] Downloading speaker recognition model: ${SHERPA_MODEL_NAME}"
+    echo "[voicebm] Downloading speaker model: ${SHERPA_MODEL_NAME}"
     MODEL_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/${SHERPA_MODEL_NAME}"
     curl -fsSL -o "${SHERPA_MODEL}" "${MODEL_URL}"
-    echo "[voicebm] Speaker model ready at ${SHERPA_MODEL}"
+    echo "[voicebm] Speaker model ready"
 fi
 
 # ---------------------------------------------------------------------------
-# Download chosen Sherpa-ONNX STT model (first run only)
+# Download STT model (first run only)
 # ---------------------------------------------------------------------------
 echo "[voicebm] Downloading STT model: ${VOICEBM_STT_MODEL}"
 python3 - << PYEOF
@@ -103,13 +74,11 @@ except Exception as e:
 PYEOF
 
 # ---------------------------------------------------------------------------
-# Fill placeholders in service templates → /app/*.py (runs on every start,
-# so changing env vars + docker-compose up -d --force-recreate applies them)
+# Fill placeholders in service templates
 # ---------------------------------------------------------------------------
 fill_template() {
     local src="$1"
     local dst="$2"
-    local audio_base_url="${3:-http://10.50.60.58:9090}"
     sed \
         -e "s|{VOICEBM_BASE}|${DATA_DIR}|g" \
         -e "s|{SHERPA_BIN}|/app/sherpa_embed.py|g" \
@@ -118,69 +87,178 @@ fill_template() {
         -e "s|{MQTT_PORT}|${MQTT_PORT}|g" \
         -e "s|{MQTT_USER}|${MQTT_USER}|g" \
         -e "s|{MQTT_PASS}|${MQTT_PASS}|g" \
-        -e "s|{AUDIO_BASE_URL}|${audio_base_url}|g" \
         -e "s|{CONDA_PATH}|/usr|g" \
+        -e "s|10\.50\.60\.58|${VOICEBM_HOST}|g" \
         "${src}" > "${dst}"
 }
 
 GLOBAL_TMPL="/app/templates/global"
-fill_template "${GLOBAL_TMPL}/voicebm_config.py.template"          /app/voicebm_config.py "${AUDIO_BASE_URL}"
-fill_template "${GLOBAL_TMPL}/voicebm_stt_service.py.template"     /app/voicebm_stt_service.py "${AUDIO_BASE_URL}"
-fill_template "${GLOBAL_TMPL}/voicebm_global_publisher.py.template" /app/voicebm_global_publisher.py "${AUDIO_BASE_URL}"
-fill_template "${GLOBAL_TMPL}/audio_server.py.template"            /app/audio_server.py "${AUDIO_BASE_URL}"
+fill_template "${GLOBAL_TMPL}/voicebm_config.py.template"          /app/voicebm_config.py
+fill_template "${GLOBAL_TMPL}/voicebm_stt_service.py.template"     /app/voicebm_stt_service.py
+fill_template "${GLOBAL_TMPL}/voicebm_global_publisher.py.template" /app/voicebm_global_publisher.py
+fill_template "${GLOBAL_TMPL}/audio_server.py.template"            /app/audio_server.py
 
 [ -f "${GLOBAL_TMPL}/enrollment_watcher.py.template" ] && \
-    fill_template "${GLOBAL_TMPL}/enrollment_watcher.py.template" /app/enrollment_watcher.py "${AUDIO_BASE_URL}"
+    fill_template "${GLOBAL_TMPL}/enrollment_watcher.py.template" /app/enrollment_watcher.py
 
 [ -f "${GLOBAL_TMPL}/voicebm_dashboard.py.template" ] && \
-    fill_template "${GLOBAL_TMPL}/voicebm_dashboard.py.template" /app/voicebm_dashboard.py "${AUDIO_BASE_URL}"
+    fill_template "${GLOBAL_TMPL}/voicebm_dashboard.py.template" /app/voicebm_dashboard.py
 
 # ---------------------------------------------------------------------------
-# Runtime patches for service files via dashboard_patches.py
+# Patch dashboard: pending.json as array vs dict
 # ---------------------------------------------------------------------------
-if [ -f /app/dashboard_patches.py ]; then
-    echo "[voicebm] Applying dashboard patches..."
-    python3 /app/dashboard_patches.py
-else
-    echo "[voicebm] dashboard_patches.py not found, skipping dashboard patches"
-fi
+python3 - << 'PYEOF'
+import re, sys
+path = '/app/voicebm_dashboard.py'
+src = open(path).read()
+old = "    return load_json(PENDING_FILE, {'entries': []})"
+new = (
+    "    data = load_json(PENDING_FILE, {'entries': []})\n"
+    "    if isinstance(data, list):\n"
+    "        return {'entries': data}\n"
+    "    return data"
+)
+if old in src:
+    open(path, 'w').write(src.replace(old, new, 1))
+    print('[voicebm] Patched: get_pending() for array format')
+else:
+    print('[voicebm] WARNING: get_pending patch target not found', file=sys.stderr)
+PYEOF
 
 # ---------------------------------------------------------------------------
-# Start services using background processes (with logs visible via docker-compose logs)
+# Patch dashboard: enroll_pending and reject_pending stubs
 # ---------------------------------------------------------------------------
-echo "[voicebm] Starting services..."
+python3 - << 'PYEOF'
+import sys
+path = '/app/voicebm_dashboard.py'
+src = open(path).read()
 
-# Check if VOICEBM is enabled (can be disabled to STT-only mode)
-if [ "${VOICEBM_ENABLED}" = "true" ] || [ "${VOICEBM_ENABLED}" = "1" ]; then
-    echo "[voicebm] Starting voicebm_stt_service..."
-    python3 -u /app/voicebm_stt_service.py &
-
-    echo "[voicebm] Starting voicebm_global_publisher..."
-    python3 -u /app/voicebm_global_publisher.py &
-
-    if [ -f /app/audio_server.py ]; then
-        echo "[voicebm] Starting audio_server on port 9090..."
-        python3 -u /app/audio_server.py &
-    fi
-
-    if [ -f /app/enrollment_watcher.py ]; then
-        echo "[voicebm] Starting enrollment_watcher..."
-        python3 -u /app/enrollment_watcher.py &
-    fi
-
-    if [ -f /app/voicebm_dashboard.py ]; then
-        echo "[voicebm] Starting voicebm_dashboard on port 5000..."
-        python3 -u /app/voicebm_dashboard.py &
-    fi
+old_enroll = '''\
+@app.route('/api/pending/enroll', methods=['POST'])
+def enroll_pending():
+    """Enroll a pending voice"""
+    data = request.get_json()
+    pending_id = data.get('pending_id')
+    display_name = data.get('display_name', '').strip()
     
-    echo "[voicebm] VoiceBM services started"
-else
-    echo "[voicebm] VoiceBM disabled (VOICEBM_ENABLED=false). STT-only mode."
+    if not pending_id or not display_name:
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    person_id = display_name.lower().replace(' ', '_')
+    
+    # TODO: Implement enrollment logic
+    # This would move files from pending_active/ to enroll/{person_id}/
+    
+    return jsonify({'success': True, 'person_id': person_id})'''
+
+new_enroll = '''\
+@app.route('/api/pending/enroll', methods=['POST'])
+def enroll_pending():
+    """Enroll a pending voice by delegating to voicebm_stt_service via MQTT."""
+    data = request.get_json()
+    pending_id = data.get('pending_id')
+    display_name = data.get('display_name', '').strip()
+
+    if not pending_id or not display_name:
+        return jsonify({'error': 'Missing required fields'}), 400
+
+    person_id = display_name.lower().replace(' ', '_')
+
+    payload = json.dumps({
+        'id': pending_id,
+        'person_id': person_id,
+        'display_name': display_name,
+    })
+    try:
+        publish_to_mqtt('voicebm/pending_active/enroll', payload, qos=1, retain=False)
+        return jsonify({'success': True, 'person_id': person_id})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500'''
+
+old_reject = '''\
+@app.route('/api/pending/reject', methods=['POST'])
+def reject_pending():
+    """Reject a pending voice"""
+    data = request.get_json()
+    pending_id = data.get('pending_id')
+    
+    if not pending_id:
+        return jsonify({'error': 'Missing pending_id'}), 400
+    
+    # TODO: Implement rejection logic
+    # This would delete files from pending_active/
+    
+    return jsonify({'success': True})'''
+
+new_reject = '''\
+@app.route('/api/pending/reject', methods=['POST'])
+def reject_pending():
+    """Reject a pending voice by delegating to voicebm_stt_service via MQTT."""
+    data = request.get_json()
+    pending_id = data.get('pending_id')
+
+    if not pending_id:
+        return jsonify({'error': 'Missing pending_id'}), 400
+
+    try:
+        publish_to_mqtt('voicebm/pending_active/reject', json.dumps({'id': pending_id}), qos=1, retain=False)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500'''
+
+patched = src
+count = 0
+for old, new in [(old_enroll, new_enroll), (old_reject, new_reject)]:
+    if old in patched:
+        patched = patched.replace(old, new, 1)
+        count += 1
+
+open(path, 'w').write(patched)
+print(f'[voicebm] Patched: {count}/2 enrollment stubs')
+if count < 2:
+    print('[voicebm] WARNING: some patches not applied', file=sys.stderr)
+PYEOF
+
+# ---------------------------------------------------------------------------
+# Run dashboard_patches.py for add_active_to_gallery and train_active_as_person
+# ---------------------------------------------------------------------------
+python3 /app/dashboard_patches.py
+
+# Fix stale hardcoded IPs in pending.json
+PENDING_JSON="${DATA_DIR}/pending_active/pending.json"
+if [ -f "${PENDING_JSON}" ]; then
+    sed -i "s|10\.50\.60\.58|${VOICEBM_HOST}|g" "${PENDING_JSON}"
 fi
 
-echo "[voicebm] Starting Wyoming proxy on port ${VOICEBM_WYOMING_PORT:-10301}..."
+# ---------------------------------------------------------------------------
+# Start services
+# ---------------------------------------------------------------------------
+echo "[voicebm] Starting voicebm_stt_service..."
+python3 /app/voicebm_stt_service.py &
+
+echo "[voicebm] Starting voicebm_global_publisher..."
+python3 /app/voicebm_global_publisher.py &
+
+if [ -f /app/audio_server.py ]; then
+    echo "[voicebm] Starting audio_server..."
+    python3 /app/audio_server.py &
+fi
+
+if [ -f /app/enrollment_watcher.py ]; then
+    echo "[voicebm] Starting enrollment_watcher..."
+    python3 /app/enrollment_watcher.py &
+fi
+
+if [ -f /app/voicebm_dashboard.py ]; then
+    echo "[voicebm] Starting voicebm_dashboard..."
+    python3 /app/voicebm_dashboard.py &
+fi
+
+echo "[voicebm] Starting Wyoming proxy..."
 env VOICEBM_STT_MODEL="${VOICEBM_STT_MODEL}" \
     VOICEBM_STT_LANGUAGE="${VOICEBM_STT_LANGUAGE}" \
     VOICEBM_STT_THREADS="${VOICEBM_STT_THREADS}" \
     VOICEBM_STT_MODEL_DIR="${STT_MODELS_DIR}" \
-    python3 -u /app/voicebm_wyoming_proxy.py
+    python3 /app/voicebm_wyoming_proxy.py
+
+wait
