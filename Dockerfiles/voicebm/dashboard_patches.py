@@ -470,11 +470,20 @@ if Path(STT_SERVICE).exists():
 
 '''
         
-        # Insert before on_connect
-        on_connect_pattern = r'(def on_connect\(client, userdata, flags, rc\):)'
-        if re.search(on_connect_pattern, stt_content):
-            stt_content = re.sub(on_connect_pattern, handle_func + r'\1', stt_content)
-            print("[voicebm] ✓ Added handle_add_to_gallery() function")
+        # Insert before on_connect (try both old and new signature)
+        on_connect_patterns = [
+            r'(def on_connect\(client, userdata, flags, reason_code, properties\):)',
+            r'(def on_connect\(client, userdata, flags, rc\):)'
+        ]
+        inserted = False
+        for pattern in on_connect_patterns:
+            if re.search(pattern, stt_content):
+                stt_content = re.sub(pattern, handle_func + r'\1', stt_content)
+                print("[voicebm] ✓ Added handle_add_to_gallery() function")
+                inserted = True
+                break
+        if not inserted:
+            print("[voicebm] WARNING: Could not find on_connect function to insert handle_add_to_gallery", file=sys.stderr)
         
         with open(STT_SERVICE, 'w') as f:
             f.write(stt_content)
