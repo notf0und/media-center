@@ -109,7 +109,7 @@ else:
 # ---------------------------------------------------------------------------
 
 m_reject = re.search(
-    r"(@app\.route\('/api/pending/reject'.*?)\n(@app\.route)",
+    r"(@app\.route\('/api/pending/reject'.*?)\n(if __name__|@app\.route)",
     src,
     re.DOTALL,
 )
