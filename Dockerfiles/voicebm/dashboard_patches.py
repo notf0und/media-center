@@ -328,7 +328,158 @@ else:
     print(f"[voicebm] WARNING: {STT_SERVICE} not found")
 
 # ---------------------------------------------------------------------------
-# 5. Audio URLs now use config.json values - no proxy routes needed
+# 5. Add add_to_gallery support to voicebm_stt_service.py
+#    - Add PENDING_ADD_TO_GALLERY_TOPIC constant
+#    - Subscribe to the topic
+#    - Add handler in on_message()
+#    - Add handle_add_to_gallery() function
+# ---------------------------------------------------------------------------
+
+if Path(STT_SERVICE).exists():
+    try:
+        with open(STT_SERVICE, 'r') as f:
+            stt_content = f.read()
+        
+        # 5a. Add PENDING_ADD_TO_GALLERY_TOPIC constant
+        topic_line = 'PENDING_REJECT_TOPIC = "voicebm/pending_active/reject"'
+        new_topic_line = topic_line + '\nPENDING_ADD_TO_GALLERY_TOPIC = "voicebm/pending_active/add_to_gallery"'
+        
+        if topic_line in stt_content and new_topic_line not in stt_content:
+            stt_content = stt_content.replace(topic_line, new_topic_line, 1)
+            print("[voicebm] ✓ Added PENDING_ADD_TO_GALLERY_TOPIC constant")
+        
+        # 5b. Add subscription to add_to_gallery topic
+        sub_line = 'client.subscribe("voicebm/pending_active/reject_btn", qos=1)'
+        new_sub_lines = sub_line + '\n    client.subscribe("voicebm/pending_active/add_to_gallery", qos=1)'
+        
+        if sub_line in stt_content and 'voicebm/pending_active/add_to_gallery' not in stt_content:
+            stt_content = stt_content.replace(sub_line, new_sub_lines, 1)
+            print("[voicebm] ✓ Added subscription to add_to_gallery topic")
+        
+        # 5c. Add elif handler in on_message()
+        handler_pattern = r'(elif topic == "voicebm/pending_active/play_btn":\s+handle_pending_play\(client, userdata, msg\))'
+        handler_addition = r'\1\n    elif topic == PENDING_ADD_TO_GALLERY_TOPIC:\n        handle_add_to_gallery(client, userdata, msg)'
+        
+        if re.search(handler_pattern, stt_content):
+            stt_content = re.sub(handler_pattern, handler_addition, stt_content)
+            print("[voicebm] ✓ Added add_to_gallery handler to on_message()")
+        
+        # 5d. Add handle_add_to_gallery() function (before on_connect)
+        handle_func = '''def handle_add_to_gallery(client, userdata, msg):
+    """Add a pending sample to an existing person's gallery."""
+    try:
+        data = json.loads(msg.payload.decode("utf-8"))
+        pending_id = data.get("id")
+        person_id = data.get("person_id", "").strip().lower().replace(" ", "_")
+        
+        if not pending_id or not person_id:
+            print("Add to gallery command missing required fields")
+            return
+        
+        print(f"Adding pending {pending_id} to gallery for {person_id}")
+        
+        # Find pending entry
+        buffer = load_pending_buffer()
+        entry = None
+        for e in buffer:
+            if e["id"] == pending_id:
+                entry = e
+                break
+        
+        if not entry:
+            print(f"Pending entry not found: {pending_id}")
+            return
+        
+        wav_src = PENDING_RECORDINGS / f"{pending_id}.wav"
+        emb_src = PENDING_EMBEDDINGS / f"{pending_id}.txt"
+        
+        if not wav_src.exists() or not emb_src.exists():
+            print(f"Pending files not found for {pending_id}")
+            return
+        
+        person_dir = Path(ENROLL_DIR) / person_id
+        if not person_dir.exists():
+            print(f"Person directory not found: {person_dir}")
+            return
+        
+        embeddings_dir = person_dir / "embeddings"
+        recordings_dir = person_dir / "recordings"
+        
+        embeddings_dir.mkdir(exist_ok=True)
+        recordings_dir.mkdir(exist_ok=True)
+        
+        metadata_file = person_dir / "metadata.json"
+        if metadata_file.exists():
+            with open(metadata_file, "r") as f:
+                metadata = json.load(f)
+                existing_samples = metadata.get("samples", [])
+        else:
+            print(f"Person metadata not found: {metadata_file}")
+            return
+        
+        # Copy (not move) files to gallery
+        event_id = pending_id
+        emb_dst = embeddings_dir / f"{event_id}.txt"
+        rec_dst = recordings_dir / f"{event_id}.wav"
+        
+        expire_at = (
+            datetime.datetime.utcfromtimestamp(time.time() + 3 * 24 * 3600)
+            .replace(microsecond=0)
+            .isoformat()
+            + "Z"
+        )
+        
+        try:
+            shutil.copy(str(emb_src), str(emb_dst))
+            shutil.copy(str(wav_src), str(rec_dst))
+            print(f"Copied files to gallery: {event_id}")
+        except Exception as e:
+            print(f"Failed to copy files: {e}")
+            return
+        
+        sample_entry = {
+            "event_id": event_id,
+            "embedding": f"embeddings/{event_id}.txt",
+            "recording": f"recordings/{event_id}.wav",
+            "enrolled_at": datetime.datetime.utcnow()
+            .replace(microsecond=0)
+            .isoformat()
+            + "Z",
+            "expire_at": expire_at,
+            "retention_days": 3,
+            "source": "active_node",
+        }
+        
+        metadata["samples"] = existing_samples + [sample_entry]
+        metadata["last_updated"] = (
+            datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        )
+        metadata["total_samples"] = len(metadata["samples"])
+        
+        with open(metadata_file, "w") as f:
+            json.dump(metadata, f, indent=2)
+        
+        print(f"Updated gallery for {person_id}")
+        
+    except Exception as e:
+        print(f"Error handling add_to_gallery: {e}")
+
+'''
+        
+        # Insert before on_connect
+        on_connect_pattern = r'(def on_connect\(client, userdata, flags, rc\):)'
+        if re.search(on_connect_pattern, stt_content):
+            stt_content = re.sub(on_connect_pattern, handle_func + r'\1', stt_content)
+            print("[voicebm] ✓ Added handle_add_to_gallery() function")
+        
+        with open(STT_SERVICE, 'w') as f:
+            f.write(stt_content)
+        
+    except Exception as e:
+        print(f"[voicebm] ERROR adding add_to_gallery support: {e}")
+
+# ---------------------------------------------------------------------------
+# 6. Audio URLs now use config.json values - no proxy routes needed
 # ---------------------------------------------------------------------------
 print("[voicebm] Audio URL patching complete")
 
