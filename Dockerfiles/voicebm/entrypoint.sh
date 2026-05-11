@@ -9,7 +9,9 @@ MQTT_BROKER="${MQTT_BROKER:-localhost}"
 MQTT_PORT="${MQTT_PORT:-1883}"
 MQTT_USER="${MQTT_USER:-}"
 MQTT_PASS="${MQTT_PASS:-}"
-AUDIO_HOST="${AUDIO_HOST:-localhost:9090}"
+# AUDIO_HOST can be set directly, or fallback to HOST_AUDIO for backward compatibility
+# Format: host:port (e.g., 192.168.1.2:9090)
+AUDIO_HOST="${AUDIO_HOST:-${HOST_AUDIO:-localhost:9090}}"
 
 # STT config
 VOICEBM_STT_MODEL="${VOICEBM_STT_MODEL:-cohere-transcribe}"
