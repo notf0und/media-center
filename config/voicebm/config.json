@@ -5,13 +5,40 @@
     "user": "mqtt",
     "password": "we7VMNXYXpWgUfYWdNUdoW"
   },
-  "thresholds": {
-    "passive": 0.22,
-    "active": 0.50
+  "hosts": {
+    "home_assistant": "homeassistant.test",
+    "orin_agx": "10.50.60.58"
+  },
+  "paths": {
+    "voicebm_base": "/home/user/voicebm",
+    "sherpa_bin": "/home/user/.local/bin/sherpa_embed.py",
+    "sherpa_model": "/home/user/sherpa_models/nemo_en_titanet_small.onnx",
+    "conda_path": "/home/user/miniforge3"
   },
   "audio_server": {
-    "host": "0.0.0.0",
+    "host": "192.168.1.2",
     "port": 9090,
-    "base_url": "http://voicebm:9090"
+    "base_url": "http://192.168.1.2:9090"
+  },
+  "rooms": {
+    "living": {
+      "rtsp_url": "rtsp://user:pass@camera-ip/Preview_01_main",
+      "recorder_enabled": true
+    },
+    "bedroom": {
+      "rtsp_url": "rtsp://user:pass@camera-ip/Preview_04_main",
+      "recorder_enabled": true
+    }
+  },
+  "thresholds": {
+    "passive": 0.22,
+    "active": 0.5
+  },
+  "voicebm": {
+    "enabled": true,
+    "sherpa_model": "nemo_en_titanet_small.onnx"
+  },
+  "dashboard": {
+    "port": 5000
   }
 }

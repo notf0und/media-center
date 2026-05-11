@@ -637,7 +637,8 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
-      - VOICEBM_HOST=192.168.1.2
+
+      # ========== SPEAKER RECOGNITION MODEL ==========
       # Speaker recognition model — single .onnx file downloaded on first start.
       # English models: nemo_en_titanet_small.onnx (38MB, default)
       #                 nemo_en_titanet_large.onnx (97MB, most accurate)
@@ -646,12 +647,32 @@ services:
       #                 wespeaker_en_voxceleb_resnet293_LM.onnx (109MB)
       #                 3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx (28MB)
       - SHERPA_MODEL_NAME=nemo_en_titanet_small.onnx
-      # Wyoming proxy — HA connects here instead of parakeet:10300
-      - VOICEBM_WYOMING_PORT=10301
+
+      # ========== HOST CONFIGURATION ==========
+      # HOST_URL: Dashboard frontend URL (what users access via browser)
+      # The port in this URL is extracted and used for the dashboard Flask app
+      # Format: http://host:port or https://host:port (port defaults: 80 for http, 443 for https)
+      - HOST_URL=http://192.168.1.2:5000
+
+      # HOST_AUDIO: Audio server URL for pending audio playback and RTSP streams (separate from frontend)
+      # Used for: audio_url in pending.json, room RTSP URLs in Home Assistant
+      # Format: http://host:port or https://host:port (port defaults: 80 for http, 443 for https)
+      - HOST_AUDIO=http://192.168.1.2:9090
+
+      # HOME_ASSISTANT_HOST: Home Assistant URL (sets hosts.home_assistant)
+      # Format: http://host:port or https://host (port defaults: 80 for http, 443 for https)
+      - HOME_ASSISTANT_HOST=http://homeassistant.test
+
+      # ========== MQTT CONFIGURATION ==========
+      - MQTT_BROKER=localhost
+      - MQTT_PORT=1883
+      - MQTT_USER=mqtt
+      - MQTT_PASS=we7VMNXYXpWgUfYWdNUdoW
+
       # ========== EMBEDDED STT CONFIGURATION ==========
       # VoiceBM includes STT (speech-to-text) internally using sherpa-onnx
       # To switch models: change VOICEBM_STT_MODEL, then run:
-      #   docker-compose up -d --build voicebm
+      #   docker-compose up -d --force-recreate voicebm
       # Models auto-download on first container start (cached in ./config/voicebm/stt-models/)
       #
       # Available STT models:
@@ -662,14 +683,26 @@ services:
       - VOICEBM_STT_MODEL=cohere-transcribe
       - VOICEBM_STT_LANGUAGE=en
       - VOICEBM_STT_THREADS=4
-      - VOICEBM_ANALYSIS_TIMEOUT=20
+
+      # ========== SPEAKER RECOGNITION THRESHOLDS ==========
+      # Passive: speaker ID threshold when not actively listening (default: 0.22)
+      # Active: speaker ID threshold when actively listening (default: 0.50)
+      - VOICEBM_THRESHOLD_PASSIVE=0.22
+      - VOICEBM_THRESHOLD_ACTIVE=0.50
+
+      # ========== VOICEBM FEATURES ==========
       # Enable/disable VoiceBM completely (true=enabled, false=STT-only mode)
       - VOICEBM_ENABLED=true
-      # MQTT broker (for speaker ID requests and HA sensor publishing)
-      - MQTT_BROKER=localhost
-      - MQTT_PORT=1883
-      - MQTT_USER=mqtt
-      - MQTT_PASS=we7VMNXYXpWgUfYWdNUdoW
+
+      # Wyoming proxy — HA connects here instead of parakeet:10300
+      - VOICEBM_WYOMING_PORT=10301
+
+      # ========== ROOMS CONFIGURATION (optional) ==========
+      # If not set, VoiceBM will use defaults from config.json.sample
+      # Format: JSON string with room definitions
+      # Example: '{"living": {"rtsp_url": "rtsp://...", "recorder_enabled": true}, ...}'
+      # - VOICEBM_ROOMS_JSON={}
+      
     volumes:
       - ./config/voicebm:/data
     network_mode: host

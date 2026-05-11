@@ -5,6 +5,7 @@ Run by entrypoint.sh after fill_template() completes.
 """
 import sys
 import re
+from pathlib import Path
 
 DASHBOARD = "/app/voicebm_dashboard.py"
 
@@ -17,6 +18,11 @@ def patch(src, old, new, label):
     return src
 
 
+# Read dashboard
+if not Path(DASHBOARD).exists():
+    print(f"[voicebm] Dashboard not found at {DASHBOARD}, skipping patches")
+    sys.exit(0)
+
 src = open(DASHBOARD).read()
 
 # ---------------------------------------------------------------------------
@@ -26,7 +32,6 @@ src = open(DASHBOARD).read()
 #    Fix: read list directly, derive paths, delegate to stt_service via MQTT
 # ---------------------------------------------------------------------------
 
-# Identify the exact function body using a regex so we don't need exact whitespace
 m = re.search(
     r"(@app\.route\('/api/active/add_to_gallery'.*?)\n(@app\.route)",
     src,
@@ -231,3 +236,4 @@ else:
     print("[voicebm] WARNING: could not find 'if __name__' insertion point", file=sys.stderr)
 
 open(DASHBOARD, "w").write(src)
+print("[voicebm] Dashboard patching complete")
