@@ -5,44 +5,13 @@
     "user": "mqtt",
     "password": "we7VMNXYXpWgUfYWdNUdoW"
   },
-  "audio_server": {
-    "host": "localhost",
-    "port": 9090,
-    "base_url": "http://localhost:9090"
-  },
-  "paths": {
-    "voicebm_base": "/data",
-    "sherpa_bin": "/app/sherpa_embed.py",
-    "sherpa_model": "/data/models/nemo_en_titanet_small.onnx",
-    "enroll_dir": "/data/enroll",
-    "recordings_dir": "/data/recordings",
-    "embeddings_dir": "/data/embeddings",
-    "meta_dir": "/data/meta",
-    "out_dir": "/data/out",
-    "pending_active_dir": "/data/pending_active",
-    "stt_requests_dir": "/data/stt_requests"
-  },
   "thresholds": {
     "passive": 0.22,
     "active": 0.50
   },
-  "wyoming_proxy": {
-    "port": 10301,
-    "upstream_uri": "tcp://localhost:10300",
-    "inject_speaker": false,
-    "analysis_timeout_seconds": 20
-  },
-  "dashboard": {
-    "port": 5055
-  },
-  "users": {
-    "gonzalo": {
-      "display_name": "Gonzalo",
-      "bermuda_sensor": "sensor.oneplus_7_pro_area_last_seen"
-    },
-    "irina": {
-      "display_name": "Irina",
-      "bermuda_sensor": "sensor.iphone_irina_area_last_seen"
-    }
+  "audio_server": {
+    "host": "0.0.0.0",
+    "port": 9090,
+    "base_url": "http://voicebm:9090"
   }
 }

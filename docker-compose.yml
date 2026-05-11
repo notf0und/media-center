@@ -637,6 +637,7 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
+      - VOICEBM_HOST=192.168.1.2
       # Speaker recognition model — single .onnx file downloaded on first start.
       # English models: nemo_en_titanet_small.onnx (38MB, default)
       #                 nemo_en_titanet_large.onnx (97MB, most accurate)
@@ -645,22 +646,25 @@ services:
       #                 wespeaker_en_voxceleb_resnet293_LM.onnx (109MB)
       #                 3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx (28MB)
       - SHERPA_MODEL_NAME=nemo_en_titanet_small.onnx
-      # VoiceBM data directory (mounted from host — holds model, enrollments, etc.)
-      - VOICEBM_BASE=/data
-      # Host IP/hostname used to build audio playback URLs in the dashboard
-      - VOICEBM_HOST=192.168.1.2
       # Wyoming proxy — HA connects here instead of parakeet:10300
       - VOICEBM_WYOMING_PORT=10301
-      # Name shown in HA when adding this Wyoming STT service
-      - VOICEBM_SERVICE_NAME=voicebm
-      # Upstream Parakeet Wyoming address (supports hostname/IP for Traefik etc.)
-      - UPSTREAM_WYOMING_URI=tcp://localhost:10300
-      # Speaker injection: false = speaker only in MQTT sensor (recommended)
-      #                    true  = prepend name to transcript ("Gonzalo: ...")
-      - VOICEBM_INJECT_SPEAKER=true
+      # ========== EMBEDDED STT CONFIGURATION ==========
+      # VoiceBM includes STT (speech-to-text) internally using sherpa-onnx
+      # To switch models: change VOICEBM_STT_MODEL, then run:
+      #   docker-compose up -d --build voicebm
+      # Models auto-download on first container start (cached in ./config/voicebm/stt-models/)
+      #
+      # Available STT models:
+      #   cohere-transcribe (1.6 GB) — most accurate, multilingual, recommended
+      #   nemo-parakeet-ctc-0.6b (71 MB) — fastest on CPU, English-only
+      #   whisper-small (609 MB) — multilingual, good balance
+      #   sensevoice-small (226 MB) — emotion & language detection
+      - VOICEBM_STT_MODEL=cohere-transcribe
+      - VOICEBM_STT_LANGUAGE=en
+      - VOICEBM_STT_THREADS=4
       - VOICEBM_ANALYSIS_TIMEOUT=20
-      # Dashboard port — VoiceBM dashboard runs on port 5000 (hardcoded by VoiceBM)
-      - VOICEBM_DASHBOARD_PORT=5000
+      # Enable/disable VoiceBM completely (true=enabled, false=STT-only mode)
+      - VOICEBM_ENABLED=true
       # MQTT broker (for speaker ID requests and HA sensor publishing)
       - MQTT_BROKER=localhost
       - MQTT_PORT=1883

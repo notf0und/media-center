@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
-"""VoiceBM Wyoming Proxy.
+"""VoiceBM Wyoming Proxy with Embedded STT.
 
-Pure proxy between Home Assistant and your existing Parakeet ASR service.
-VoiceBM only handles speaker identification (Sherpa-ONNX via voicebm_stt_service).
-The actual transcription is always done by the upstream Parakeet container.
+VoiceBM handles both:
+1. Speaker identification (Sherpa-ONNX speaker recognition)
+2. Speech-to-text transcription (embedded Sherpa-ONNX offline recognizer)
+
+This makes voicebm completely self-contained — no dependency on external
+parakeet/sherpa-onnx-asr services.
 
 Flow:
-  HA → voicebm:10301 → [speaker ID via MQTT] → parakeet:10300 → transcript
-                                                                      ↓
-                                              publishes to voicebm/living/current_speaker
-                                              (HA reads this for personalized intents)
+  HA → voicebm:10301 → [speaker ID via MQTT + embedded STT] → transcript
+                                                                    ↓
+                                                publishes to voicebm/living/current_speaker
+                                                (HA reads this for personalized intents)
 
-UPSTREAM_WYOMING_URI accepts any TCP address, e.g.:
-  tcp://localhost:10300         (default, direct)
-  tcp://parakeet.home:10300     (hostname)
-  tcp://192.168.1.50:10300      (IP)
-  tcp://parakeet.test:10300     (Traefik TCP router)
-
-Set VOICEBM_INJECT_SPEAKER=true to prepend speaker name to transcript
+Set speaker identification via VoiceBM dashboard UI settings
 ("Gonzalo: where is my phone") for slot-based HA intent matching.
 Default is false — speaker is only available via the MQTT sensor.
+
+STT model selection via environment variables:
+  VOICEBM_STT_MODEL    - Model name (default: cohere-transcribe)
+  VOICEBM_STT_LANGUAGE - Language code (default: en)
+  VOICEBM_STT_THREADS  - CPU threads (default: 4)
 
 All settings come from environment variables in docker-compose.yml.
 To change: update docker-compose.yml → docker-compose up -d --force-recreate voicebm
@@ -29,6 +31,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 import wave
@@ -40,10 +43,13 @@ import dataclasses
 import paho.mqtt.client as mqtt
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.asr import Transcribe, Transcript
-from wyoming.client import AsyncClient
 from wyoming.event import Event
-from wyoming.info import Describe, Info
+from wyoming.info import Describe, Info, AsrModel, AsrProgram, Attribution
 from wyoming.server import AsyncEventHandler, AsyncServer
+
+# Import embedded STT engine
+sys.path.insert(0, "/app")
+import voicebm_stt_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 _LOGGER = logging.getLogger("voicebm.proxy")
@@ -52,20 +58,47 @@ _LOGGER = logging.getLogger("voicebm.proxy")
 # Configuration (all from docker-compose.yml environment section)
 # ---------------------------------------------------------------------------
 VOICEBM_WYOMING_PORT   = int(os.getenv("VOICEBM_WYOMING_PORT", "10301"))
-UPSTREAM_WYOMING_URI   = os.getenv("UPSTREAM_WYOMING_URI", "tcp://localhost:10300")
-VOICEBM_SERVICE_NAME   = os.getenv("VOICEBM_SERVICE_NAME", "voicebm")  # name shown in HA
+VOICEBM_SERVICE_NAME   = "voicebm"  # hardcoded service name shown in HA
 MQTT_BROKER            = os.getenv("MQTT_BROKER", "localhost")
 MQTT_PORT              = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USER              = os.getenv("MQTT_USER", "")
 MQTT_PASS              = os.getenv("MQTT_PASS", "")
 SHARED_AUDIO_DIR       = os.getenv("SHARED_AUDIO_DIR", "/data/stt_requests")
 ANALYSIS_TIMEOUT       = int(os.getenv("VOICEBM_ANALYSIS_TIMEOUT", "20"))
-INJECT_SPEAKER         = os.getenv("VOICEBM_INJECT_SPEAKER", "false").lower() == "true"
+SETTINGS_FILE          = "/data/meta/settings.json"
+
+# STT configuration (embedded engine)
+VOICEBM_STT_MODEL      = os.getenv("VOICEBM_STT_MODEL", "cohere-transcribe")
+VOICEBM_STT_LANGUAGE   = os.getenv("VOICEBM_STT_LANGUAGE", "en")
+VOICEBM_STT_THREADS    = int(os.getenv("VOICEBM_STT_THREADS", "4"))
+VOICEBM_STT_MODEL_DIR  = os.getenv("VOICEBM_STT_MODEL_DIR", "/data/stt-models")
 
 VB_REQUEST_TOPIC       = "voicebm/stt/analyze_request"
 VB_RESPONSE_TOPIC_BASE = "voicebm/stt/analyze_response"
 VB_CURRENT_SPEAKER     = "voicebm/living/current_speaker"
 VB_TRANSCRIPT_TOPIC    = "voicebm/transcript/full"
+
+# Global STT engine instance
+_STT_ENGINE = None
+
+
+# ---------------------------------------------------------------------------
+# Settings management
+# ---------------------------------------------------------------------------
+def get_inject_identity_setting() -> bool:
+    """Read the inject_identity setting from settings.json.
+    
+    This allows real-time control from VoiceBM UI without needing a container restart.
+    Default to True if file doesn't exist or can't be read.
+    """
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                settings = json.load(f)
+                return settings.get('inject_identity', True)
+    except Exception as e:
+        _LOGGER.warning(f"Failed to read settings from {SETTINGS_FILE}: {e}")
+    return True  # Default to True if can't read
 
 
 # ---------------------------------------------------------------------------
@@ -172,21 +205,38 @@ class VoiceBMProxyHandler(AsyncEventHandler):
         Path(SHARED_AUDIO_DIR).mkdir(parents=True, exist_ok=True)
 
     async def handle_event(self, event: Event) -> bool:
-        # Forward Describe to real Parakeet, then rename programs to VOICEBM_SERVICE_NAME
+        # Describe: return info about embedded STT + speaker ID
         if Describe.is_type(event.type):
             try:
-                async with AsyncClient.from_uri(UPSTREAM_WYOMING_URI) as client:
-                    await client.write_event(event)
-                    info_event = await asyncio.wait_for(client.read_event(), timeout=10.0)
-                    if info_event:
-                        info = Info.from_event(info_event)
-                        renamed_asr = [
-                            dataclasses.replace(p, name=VOICEBM_SERVICE_NAME)
-                            for p in info.asr
-                        ]
-                        await self.write_event(dataclasses.replace(info, asr=renamed_asr).event())
+                info = Info(
+                    asr=[
+                        AsrProgram(
+                            name=VOICEBM_SERVICE_NAME,
+                            description="VoiceBM (embedded STT + speaker ID)",
+                            version="1.0",
+                            attribution=Attribution(
+                                name="VoiceBM + sherpa-onnx",
+                                url="https://github.com/cybericebyte/VoiceBM",
+                            ),
+                            installed=True,
+                            models=[
+                                AsrModel(
+                                    name=VOICEBM_STT_MODEL,
+                                    description=VOICEBM_STT_MODEL,
+                                    version="1.0",
+                                    attribution=Attribution(
+                                        name="k2-fsa", url="https://github.com/k2-fsa/sherpa-onnx"
+                                    ),
+                                    installed=True,
+                                    languages=[VOICEBM_STT_LANGUAGE],
+                                )
+                            ],
+                        )
+                    ]
+                )
+                await self.write_event(info.event())
             except Exception as exc:
-                _LOGGER.warning(f"Could not fetch upstream Info: {exc}")
+                _LOGGER.warning(f"Error building Describe response: {exc}")
             return True
 
         if Transcribe.is_type(event.type):
@@ -225,8 +275,14 @@ class VoiceBMProxyHandler(AsyncEventHandler):
                     wf.writeframes(chunk.audio)
 
             loop = asyncio.get_running_loop()
-            speaker_id, display_name, confidence, inject_enabled, is_blocked = \
-                await loop.run_in_executor(None, request_speaker_id, audio_path)
+            
+            # Run speaker ID and STT in parallel for better performance
+            speaker_result, transcript = await asyncio.gather(
+                loop.run_in_executor(None, request_speaker_id, audio_path),
+                self._get_embedded_transcript()
+            )
+            
+            speaker_id, display_name, confidence, inject_enabled, is_blocked = speaker_result
 
             _LOGGER.info(
                 f"Speaker: {display_name!r} conf={confidence:.3f} blocked={is_blocked}"
@@ -236,11 +292,9 @@ class VoiceBMProxyHandler(AsyncEventHandler):
                 await self.write_event(Transcript(text="").event())
                 return
 
-            # Transcription from the real Parakeet — no ASR model runs here
-            transcript = await self._get_upstream_transcript()
-
-            # Prepend speaker name only if VOICEBM_INJECT_SPEAKER=true
-            if INJECT_SPEAKER and inject_enabled and speaker_id not in ("unknown", ""):
+            # Prepend speaker name only if injection is enabled in settings
+            inject_speaker = get_inject_identity_setting()
+            if inject_speaker and inject_enabled and speaker_id not in ("unknown", "") and display_name not in ("unknown", "", None):
                 final_text = f"{display_name}: {transcript}"
             else:
                 final_text = transcript
@@ -259,40 +313,52 @@ class VoiceBMProxyHandler(AsyncEventHandler):
             except Exception:
                 pass
 
-    async def _get_upstream_transcript(self) -> str:
-        """Forward all buffered audio to the real Parakeet and return the transcript text."""
+    async def _get_embedded_transcript(self) -> str:
+        """Recognize speech using embedded STT engine."""
+        if not self._audio_chunks or not _STT_ENGINE:
+            return ""
+
         try:
-            async with AsyncClient.from_uri(UPSTREAM_WYOMING_URI) as client:
-                await client.write_event(Transcribe(language=self._language).event())
-                await client.write_event(
-                    AudioStart(rate=self._rate, width=self._width, channels=self._channels).event()
-                )
-                for chunk in self._audio_chunks:
-                    await client.write_event(chunk.event())
-                await client.write_event(AudioStop().event())
-
-                while True:
-                    ev = await asyncio.wait_for(client.read_event(), timeout=60.0)
-                    if ev is None:
-                        break
-                    if Transcript.is_type(ev.type):
-                        return Transcript.from_event(ev).text
-
-        except asyncio.TimeoutError:
-            _LOGGER.error("Upstream Parakeet timed out")
+            loop = asyncio.get_running_loop()
+            
+            # Combine audio chunks into a single buffer
+            raw_audio = b"".join(chunk.audio for chunk in self._audio_chunks)
+            
+            # Run STT in executor (it's CPU-intensive)
+            text = await loop.run_in_executor(
+                None, _STT_ENGINE.recognize, raw_audio, self._rate
+            )
+            return text
         except Exception as exc:
-            _LOGGER.error(f"Upstream Parakeet error: {exc}", exc_info=True)
-        return ""
+            _LOGGER.error(f"Embedded STT error: {exc}", exc_info=True)
+            return ""
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 async def main() -> None:
+    global _STT_ENGINE
+    
+    inject_status = get_inject_identity_setting()
     _LOGGER.info(
-        f"VoiceBM Proxy  port={VOICEBM_WYOMING_PORT}  upstream={UPSTREAM_WYOMING_URI}"
+        f"VoiceBM Proxy  port={VOICEBM_WYOMING_PORT}  STT={VOICEBM_STT_MODEL}"
     )
-    _LOGGER.info(f"Speaker injection={'on' if INJECT_SPEAKER else 'off (MQTT sensor only)'}")
+    _LOGGER.info(f"Speaker injection={inject_status} (from {SETTINGS_FILE})")
+    
+    # Initialize embedded STT engine
+    try:
+        _STT_ENGINE = voicebm_stt_engine.init_stt_engine(
+            model_name=VOICEBM_STT_MODEL,
+            model_dir=VOICEBM_STT_MODEL_DIR,
+            language=VOICEBM_STT_LANGUAGE,
+            num_threads=VOICEBM_STT_THREADS,
+        )
+        _LOGGER.info("Embedded STT engine ready")
+    except Exception as exc:
+        _LOGGER.error(f"Failed to initialize STT engine: {exc}")
+        raise
+    
     server = AsyncServer.from_uri(f"tcp://0.0.0.0:{VOICEBM_WYOMING_PORT}")
     _LOGGER.info("Ready")
     await server.run(VoiceBMProxyHandler)

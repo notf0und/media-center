@@ -147,4 +147,87 @@ def train_active_as_person():
 else:
     print("[voicebm] WARNING: train_active_as_person not found", file=sys.stderr)
 
+# ---------------------------------------------------------------------------
+# 3. Fix audio URLs to use relative paths (browser-portable)
+#    Change: http://10.50.60.58:9090/pending/{id}.wav
+#    To:     /pending/{id}.wav
+#    This allows URLs to work regardless of host IP, domain, or proxy setup
+# ---------------------------------------------------------------------------
+
+STT_SERVICE = "/app/voicebm_stt_service.py"
+stt_src = open(STT_SERVICE).read()
+stt_src = stt_src.replace(
+    '"audio_url": f"/api/audio/pending/{pending_id}.wav",',
+    '"audio_url": f"/pending/{pending_id}.wav",',
+    1
+)
+open(STT_SERVICE, "w").write(stt_src)
+print("[voicebm] Patched: voicebm_stt_service.py audio_url to /pending proxy")
+
+AUDIO_SERVER = "/app/audio_server.py"
+if open(AUDIO_SERVER).read().find("10.50.60.58") >= 0:
+    audio_src = open(AUDIO_SERVER).read()
+    audio_src = audio_src.replace(
+        '        print(f"  http://10.50.60.58:{PORT}/living/living_20251128_120000.wav")',
+        '        print(f"  /living/living_20251128_120000.wav")',
+        1
+    )
+    audio_src = audio_src.replace(
+        '        print(f"  http://10.50.60.58:{PORT}/pending/active_1732825200000.wav")',
+        '        print(f"  /pending/active_1732825200000.wav")',
+        1
+    )
+    open(AUDIO_SERVER, "w").write(audio_src)
+    print("[voicebm] Patched: audio_server.py example URLs to relative paths")
+
+# ---------------------------------------------------------------------------
+# 4. Add audio proxy routes for /pending/ and /api/audio/
+#    Both proxy to audio_server on port 9090
+#    /pending/{file} is for backward compatibility and direct browser access
+#    /api/audio/{path} is for programmatic/API access
+# ---------------------------------------------------------------------------
+
+audio_proxy = '''
+@app.route('/pending/<path:filepath>')
+def proxy_pending(filepath):
+    """Proxy /pending/ requests to the audio server on port 9090"""
+    import urllib.request
+    url = f"http://localhost:9090/pending/{filepath}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            content_type = response.headers.get('content-type', 'audio/wav')
+            return app.response_class(
+                response.read(),
+                content_type=content_type,
+                status=response.status
+            )
+    except Exception as e:
+        return jsonify({'error': f'Audio proxy error: {str(e)}'}), 500
+
+@app.route('/api/audio/<path:filepath>')
+def proxy_audio(filepath):
+    """Proxy /api/audio/ requests to the audio server on port 9090"""
+    import urllib.request
+    url = f"http://localhost:9090/{filepath}"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            content_type = response.headers.get('content-type', 'audio/wav')
+            return app.response_class(
+                response.read(),
+                content_type=content_type,
+                status=response.status
+            )
+    except Exception as e:
+        return jsonify({'error': f'Audio proxy error: {str(e)}'}), 500
+
+'''
+
+# Insert before "if __name__"
+if_main_pos = src.find('\nif __name__')
+if if_main_pos > 0:
+    src = src[:if_main_pos] + '\n' + audio_proxy + src[if_main_pos:]
+    print("[voicebm] Added: /pending/<file> and /api/audio/<path> proxy routes")
+else:
+    print("[voicebm] WARNING: could not find 'if __name__' insertion point", file=sys.stderr)
+
 open(DASHBOARD, "w").write(src)

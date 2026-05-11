@@ -24,15 +24,31 @@
 #   https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models
 set -e
 
-DATA_DIR="${VOICEBM_BASE:-/data}"
+DATA_DIR="/data"  # hardcoded, always /data (mounted from host via volumes)
 MODELS_DIR="${DATA_DIR}/models"
+STT_MODELS_DIR="${DATA_DIR}/stt-models"
 SHERPA_MODEL_NAME="${SHERPA_MODEL_NAME:-nemo_en_titanet_small.onnx}"
 SHERPA_MODEL="${SHERPA_MODEL:-${MODELS_DIR}/${SHERPA_MODEL_NAME}}"
 MQTT_BROKER="${MQTT_BROKER:-localhost}"
 MQTT_PORT="${MQTT_PORT:-1883}"
 MQTT_USER="${MQTT_USER:-}"
 MQTT_PASS="${MQTT_PASS:-}"
-VOICEBM_HOST="${VOICEBM_HOST:-localhost}"
+VOICEBM_ENABLED="${VOICEBM_ENABLED:-true}"  # enable/disable VoiceBM completely
+
+# Embedded STT configuration
+VOICEBM_STT_MODEL="${VOICEBM_STT_MODEL:-cohere-transcribe}"
+VOICEBM_STT_LANGUAGE="${VOICEBM_STT_LANGUAGE:-en}"
+VOICEBM_STT_THREADS="${VOICEBM_STT_THREADS:-4}"
+
+# ---------------------------------------------------------------------------
+# Patch templates before fill_template: fix hardcoded IPs
+# Replace: "audio_url": f"http://10.50.60.58:9090/pending/{pending_id}.wav"
+# With:    "audio_url": f"/pending/{pending_id}.wav"
+# This ensures NEW audio entries don't have hardcoded IPs
+# ---------------------------------------------------------------------------
+sed -i 's|"audio_url": f"http://10\.50\.60\.58:9090/\(pending/{pending_id}\.wav\)"|"audio_url": f"/\1"|' /app/templates/global/voicebm_stt_service.py.template
+sed -i 's|http://10\.50\.60\.58:\${PORT}/\(living/\|pending/\)|/\1|g' /app/templates/global/audio_server.py.template
+echo "[voicebm] Fixed template URLs to use relative paths"
 
 # ---------------------------------------------------------------------------
 # Ensure runtime directories exist
@@ -44,28 +60,35 @@ mkdir -p \
     "${DATA_DIR}/pending_active/recordings" \
     "${DATA_DIR}/meta" \
     "${MODELS_DIR}" \
+    "${STT_MODELS_DIR}" \
     "${DATA_DIR}/stt_requests" \
     "${DATA_DIR}/bin"
-
-# Create the Sherpa embedding wrapper expected by voicebm_stt_service
-cat > "${DATA_DIR}/bin/embed_stt.sh" << EOF
-#!/usr/bin/env bash
-set -euo pipefail
-INPUT="\$1"
-OUTPUT="\$2"
-exec python3 /app/sherpa_embed.py --model "${SHERPA_MODEL}" --wav "\$INPUT" --out "\$OUTPUT"
-EOF
-chmod +x "${DATA_DIR}/bin/embed_stt.sh"
 
 # ---------------------------------------------------------------------------
 # Download chosen Sherpa-ONNX speaker recognition model (first run only)
 # ---------------------------------------------------------------------------
 if [ ! -f "${SHERPA_MODEL}" ]; then
-    echo "[voicebm] Downloading model: ${SHERPA_MODEL_NAME}"
+    echo "[voicebm] Downloading speaker recognition model: ${SHERPA_MODEL_NAME}"
     MODEL_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/${SHERPA_MODEL_NAME}"
     curl -fsSL -o "${SHERPA_MODEL}" "${MODEL_URL}"
-    echo "[voicebm] Model ready at ${SHERPA_MODEL}"
+    echo "[voicebm] Speaker model ready at ${SHERPA_MODEL}"
 fi
+
+# ---------------------------------------------------------------------------
+# Download chosen Sherpa-ONNX STT model (first run only)
+# ---------------------------------------------------------------------------
+echo "[voicebm] Downloading STT model: ${VOICEBM_STT_MODEL}"
+python3 - << PYEOF
+import sys
+sys.path.insert(0, "/app")
+import voicebm_stt_engine
+try:
+    voicebm_stt_engine.download_stt_model("${VOICEBM_STT_MODEL}", "${STT_MODELS_DIR}")
+    print("[voicebm] STT model ready")
+except Exception as e:
+    print(f"[voicebm] ERROR downloading STT model: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
 
 # ---------------------------------------------------------------------------
 # Fill placeholders in service templates → /app/*.py (runs on every start,
@@ -83,7 +106,6 @@ fill_template() {
         -e "s|{MQTT_USER}|${MQTT_USER}|g" \
         -e "s|{MQTT_PASS}|${MQTT_PASS}|g" \
         -e "s|{CONDA_PATH}|/usr|g" \
-        -e "s|10\.50\.60\.58|${VOICEBM_HOST}|g" \
         "${src}" > "${dst}"
 }
 
@@ -215,39 +237,89 @@ PYEOF
 # Patch dashboard: fix add_active_to_gallery (list vs dict + missing fields)
 python3 /app/dashboard_patches.py
 
-# Fix any stale hardcoded IPs in existing pending.json (from previous runs)
-PENDING_JSON="${DATA_DIR}/pending_active/pending.json"
-if [ -f "${PENDING_JSON}" ]; then
-    sed -i "s|10\.50\.60\.58|${VOICEBM_HOST}|g" "${PENDING_JSON}"
-    echo "[voicebm] Fixed audio URLs in pending.json"
-fi
+# ---------------------------------------------------------------------------
+# Fix pending.json: convert URLs to /pending/ proxy paths
+# Converts: http://[host]:[port]/pending/[file] or /api/audio/pending/[file]
+# To:       /pending/[file]
+# This makes all URLs go through the dashboard proxy (port 5000) → audio_server (9090)
+# ---------------------------------------------------------------------------
+python3 - << 'PYEOF'
+import json
+import re
+from pathlib import Path
+
+PENDING_FILE = "/data/pending_active/pending.json"
+if Path(PENDING_FILE).exists():
+    try:
+        with open(PENDING_FILE) as f:
+            content = f.read().strip()
+        if content:
+            data = json.loads(content)
+            entries = data if isinstance(data, list) else data.get('entries', [])
+            fixed_count = 0
+            
+            for entry in entries:
+                if 'audio_url' in entry:
+                    old_url = entry['audio_url']
+                    # Convert any URL format to /pending/[file]
+                    # Pattern 1: http://[host]:[port]/pending/[file]
+                    # Pattern 2: http://[host]:[port]/api/audio/pending/[file]
+                    # Pattern 3: /api/audio/pending/[file]
+                    # Pattern 4: /pending/[file] (already correct)
+                    if 'pending/' in old_url:
+                        # Extract the part after 'pending/'
+                        match = re.search(r'pending/([^"]+)', old_url)
+                        if match:
+                            filename = match.group(1)
+                            new_url = f"/pending/{filename}"
+                            if new_url != old_url:
+                                entry['audio_url'] = new_url
+                                fixed_count += 1
+            
+            if fixed_count > 0:
+                output = data if isinstance(data, list) else {'entries': entries}
+                with open(PENDING_FILE, 'w') as f:
+                    json.dump(output, f, indent=2)
+                print(f"[voicebm] Fixed {fixed_count} pending entries to use /pending proxy paths")
+    except Exception as e:
+        print(f"[voicebm] WARNING: could not fix pending.json: {e}", file=sys.stderr)
+PYEOF
 
 # ---------------------------------------------------------------------------
 # Start services in background (all configuration is env-driven)
 # ---------------------------------------------------------------------------
-echo "[voicebm] Starting voicebm_stt_service..."
-python3 /app/voicebm_stt_service.py &
+# Check if VOICEBM is enabled (can be disabled to STT-only mode)
+if [ "${VOICEBM_ENABLED}" = "true" ] || [ "${VOICEBM_ENABLED}" = "1" ]; then
+    echo "[voicebm] Starting voicebm_stt_service..."
+    python3 /app/voicebm_stt_service.py &
 
-echo "[voicebm] Starting voicebm_global_publisher..."
-python3 /app/voicebm_global_publisher.py &
+    echo "[voicebm] Starting voicebm_global_publisher..."
+    python3 /app/voicebm_global_publisher.py &
 
-if [ -f /app/audio_server.py ]; then
-    echo "[voicebm] Starting audio_server on port 9090..."
-    python3 /app/audio_server.py &
-fi
+    if [ -f /app/audio_server.py ]; then
+        echo "[voicebm] Starting audio_server on port 9090..."
+        python3 /app/audio_server.py &
+    fi
 
-if [ -f /app/enrollment_watcher.py ]; then
-    echo "[voicebm] Starting enrollment_watcher..."
-    python3 /app/enrollment_watcher.py &
-fi
+    if [ -f /app/enrollment_watcher.py ]; then
+        echo "[voicebm] Starting enrollment_watcher..."
+        python3 /app/enrollment_watcher.py &
+    fi
 
-if [ -f /app/voicebm_dashboard.py ]; then
-    echo "[voicebm] Starting voicebm_dashboard on port ${VOICEBM_DASHBOARD_PORT:-5055}..."
-    python3 /app/voicebm_dashboard.py &
+    if [ -f /app/voicebm_dashboard.py ]; then
+        echo "[voicebm] Starting voicebm_dashboard on port 5000..."
+        python3 /app/voicebm_dashboard.py &
+    fi
+else
+    echo "[voicebm] VoiceBM disabled (VOICEBM_ENABLED=false). STT-only mode."
 fi
 
 echo "[voicebm] Starting Wyoming proxy on port ${VOICEBM_WYOMING_PORT:-10301}..."
-python3 /app/voicebm_wyoming_proxy.py &
+VOICEBM_STT_MODEL="${VOICEBM_STT_MODEL}" \
+VOICEBM_STT_LANGUAGE="${VOICEBM_STT_LANGUAGE}" \
+VOICEBM_STT_THREADS="${VOICEBM_STT_THREADS}" \
+VOICEBM_STT_MODEL_DIR="${STT_MODELS_DIR}" \
+    python3 /app/voicebm_wyoming_proxy.py &
 
 echo "[voicebm] All services started. Model: ${SHERPA_MODEL_NAME}"
 wait
