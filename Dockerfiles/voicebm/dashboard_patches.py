@@ -156,27 +156,8 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 # 2. Fix add_active_to_gallery
 #    Bug: pending.json is a plain list but code calls .get('entries')
-#    Original: adds to EXISTING person's gallery by copying files
-#    Our approach: delegate to stt_service via MQTT to add to gallery
-# ---------------------------------------------------------------------------
-
-try:
-    old_run_pattern = r"app\.run\(host='0\.0\.0\.0', port=5000"
-    new_run_pattern = f"app.run(host='0.0.0.0', port={dashboard_port}"
-    
-    if re.search(old_run_pattern, src):
-        src = re.sub(old_run_pattern, new_run_pattern, src)
-        print(f"[voicebm] ✓ Fixed dashboard port to {dashboard_port} from config")
-    else:
-        print("[voicebm] • dashboard port already updated or not found")
-except Exception as e:
-    print(f"[voicebm] ERROR fixing dashboard port: {e}")
-
-# ---------------------------------------------------------------------------
-# 2. Fix add_active_to_gallery
-#    Bug: pending.json is a plain list but code calls .get('entries')
-#    Original: copies files to existing person's gallery
-#    Our approach: delegate to stt_service via MQTT to add to gallery
+#    Solution: Reuse the enroll flow by publishing to voicebm/pending_active/enroll
+#    The backend handles both new person creation and gallery additions the same way
 # ---------------------------------------------------------------------------
 
 m = re.search(
@@ -201,6 +182,12 @@ def add_active_to_gallery():
         if not person_dir.exists():
             return jsonify({'error': f'Person \"{person_id}\" not found'}), 404
 
+        meta_file = person_dir / 'metadata.json'
+        display_name = person_id.replace('_', ' ').title()
+        if meta_file.exists():
+            with open(meta_file) as f:
+                display_name = json.load(f).get('display_name', display_name)
+
         if not Path(PENDING_FILE).exists():
             return jsonify({'error': 'No recent samples available'}), 404
 
@@ -213,9 +200,14 @@ def add_active_to_gallery():
 
         most_recent = entries[-1]
         pending_id = most_recent['id']
+        emb_src = Path(PENDING_RECORDINGS).parent / 'embeddings' / f'{pending_id}.txt'
+        wav_src = Path(PENDING_RECORDINGS) / f'{pending_id}.wav'
 
-        payload = json.dumps({'id': pending_id, 'person_id': person_id})
-        publish_to_mqtt('voicebm/pending_active/add_to_gallery', payload, qos=1, retain=False)
+        if not wav_src.exists() or not emb_src.exists():
+            return jsonify({'error': 'Sample files not found'}), 404
+
+        payload = json.dumps({'id': pending_id, 'person_id': person_id, 'display_name': display_name})
+        publish_to_mqtt('voicebm/pending_active/enroll', payload, qos=1, retain=False)
         return jsonify({'success': True, 'person_id': person_id})
 
     except Exception as e:
@@ -328,171 +320,7 @@ else:
     print(f"[voicebm] WARNING: {STT_SERVICE} not found")
 
 # ---------------------------------------------------------------------------
-# 5. Add add_to_gallery support to voicebm_stt_service.py
-#    - Add PENDING_ADD_TO_GALLERY_TOPIC constant
-#    - Subscribe to the topic
-#    - Add handler in on_message()
-#    - Add handle_add_to_gallery() function
-# ---------------------------------------------------------------------------
-
-if Path(STT_SERVICE).exists():
-    try:
-        with open(STT_SERVICE, 'r') as f:
-            stt_content = f.read()
-        
-        # 5a. Add PENDING_ADD_TO_GALLERY_TOPIC constant
-        topic_line = 'PENDING_REJECT_TOPIC = "voicebm/pending_active/reject"'
-        new_topic_line = topic_line + '\nPENDING_ADD_TO_GALLERY_TOPIC = "voicebm/pending_active/add_to_gallery"'
-        
-        if topic_line in stt_content and new_topic_line not in stt_content:
-            stt_content = stt_content.replace(topic_line, new_topic_line, 1)
-            print("[voicebm] ✓ Added PENDING_ADD_TO_GALLERY_TOPIC constant")
-        
-        # 5b. Add subscription to add_to_gallery topic
-        # Pattern: find the play_btn subscription and add add_to_gallery after it
-        play_btn_sub = re.escape('client.subscribe("voicebm/pending_active/play_btn", qos=1)')
-        if re.search(play_btn_sub, stt_content):
-            # Insert the new subscription after play_btn
-            old_pattern = r'(client\.subscribe\("voicebm/pending_active/play_btn", qos=1\))'
-            new_pattern = r'\1\n        client.subscribe(PENDING_ADD_TO_GALLERY_TOPIC, qos=1)'
-            if 'PENDING_ADD_TO_GALLERY_TOPIC' in stt_content:
-                stt_content = re.sub(old_pattern, new_pattern, stt_content, count=1)
-                print("[voicebm] ✓ Added subscription to add_to_gallery topic")
-        
-        # 5c. Add elif handler in on_message()
-        # Pattern: find play_btn handler and add add_to_gallery after it
-        handler_pattern = r'(elif topic == "voicebm/pending_active/play_btn":\s+handle_play_button\(client, userdata, msg\))'
-        handler_addition = r'\1\n    elif topic == PENDING_ADD_TO_GALLERY_TOPIC:\n        handle_add_to_gallery(client, userdata, msg)'
-        
-        if re.search(handler_pattern, stt_content):
-            stt_content = re.sub(handler_pattern, handler_addition, stt_content)
-            print("[voicebm] ✓ Added add_to_gallery handler to on_message()")
-        
-        # 5d. Add handle_add_to_gallery() function (before on_connect)
-        handle_func = '''def handle_add_to_gallery(client, userdata, msg):
-    """Add a pending sample to an existing person's gallery."""
-    try:
-        data = json.loads(msg.payload.decode("utf-8"))
-        pending_id = data.get("id")
-        person_id = data.get("person_id", "").strip().lower().replace(" ", "_")
-        
-        if not pending_id or not person_id:
-            print("Add to gallery command missing required fields")
-            return
-        
-        print(f"Adding pending {pending_id} to gallery for {person_id}")
-        
-        # Find pending entry
-        buffer = load_pending_buffer()
-        entry = None
-        for e in buffer:
-            if e["id"] == pending_id:
-                entry = e
-                break
-        
-        if not entry:
-            print(f"Pending entry not found: {pending_id}")
-            return
-        
-        wav_src = PENDING_RECORDINGS / f"{pending_id}.wav"
-        emb_src = PENDING_EMBEDDINGS / f"{pending_id}.txt"
-        
-        if not wav_src.exists() or not emb_src.exists():
-            print(f"Pending files not found for {pending_id}")
-            return
-        
-        person_dir = Path(ENROLL_DIR) / person_id
-        if not person_dir.exists():
-            print(f"Person directory not found: {person_dir}")
-            return
-        
-        embeddings_dir = person_dir / "embeddings"
-        recordings_dir = person_dir / "recordings"
-        
-        embeddings_dir.mkdir(exist_ok=True)
-        recordings_dir.mkdir(exist_ok=True)
-        
-        metadata_file = person_dir / "metadata.json"
-        if metadata_file.exists():
-            with open(metadata_file, "r") as f:
-                metadata = json.load(f)
-                existing_samples = metadata.get("samples", [])
-        else:
-            print(f"Person metadata not found: {metadata_file}")
-            return
-        
-        # Copy (not move) files to gallery
-        event_id = pending_id
-        emb_dst = embeddings_dir / f"{event_id}.txt"
-        rec_dst = recordings_dir / f"{event_id}.wav"
-        
-        expire_at = (
-            datetime.datetime.utcfromtimestamp(time.time() + 3 * 24 * 3600)
-            .replace(microsecond=0)
-            .isoformat()
-            + "Z"
-        )
-        
-        try:
-            shutil.copy(str(emb_src), str(emb_dst))
-            shutil.copy(str(wav_src), str(rec_dst))
-            print(f"Copied files to gallery: {event_id}")
-        except Exception as e:
-            print(f"Failed to copy files: {e}")
-            return
-        
-        sample_entry = {
-            "event_id": event_id,
-            "embedding": f"embeddings/{event_id}.txt",
-            "recording": f"recordings/{event_id}.wav",
-            "enrolled_at": datetime.datetime.utcnow()
-            .replace(microsecond=0)
-            .isoformat()
-            + "Z",
-            "expire_at": expire_at,
-            "retention_days": 3,
-            "source": "active_node",
-        }
-        
-        metadata["samples"] = existing_samples + [sample_entry]
-        metadata["last_updated"] = (
-            datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-        )
-        metadata["total_samples"] = len(metadata["samples"])
-        
-        with open(metadata_file, "w") as f:
-            json.dump(metadata, f, indent=2)
-        
-        print(f"Updated gallery for {person_id}")
-        
-    except Exception as e:
-        print(f"Error handling add_to_gallery: {e}")
-
-'''
-        
-        # Insert before on_connect (try both old and new signature)
-        on_connect_patterns = [
-            r'(def on_connect\(client, userdata, flags, reason_code, properties\):)',
-            r'(def on_connect\(client, userdata, flags, rc\):)'
-        ]
-        inserted = False
-        for pattern in on_connect_patterns:
-            if re.search(pattern, stt_content):
-                stt_content = re.sub(pattern, handle_func + r'\1', stt_content)
-                print("[voicebm] ✓ Added handle_add_to_gallery() function")
-                inserted = True
-                break
-        if not inserted:
-            print("[voicebm] WARNING: Could not find on_connect function to insert handle_add_to_gallery", file=sys.stderr)
-        
-        with open(STT_SERVICE, 'w') as f:
-            f.write(stt_content)
-        
-    except Exception as e:
-        print(f"[voicebm] ERROR adding add_to_gallery support: {e}")
-
-# ---------------------------------------------------------------------------
-# 6. Audio URLs now use config.json values - no proxy routes needed
+# 5. Audio URLs now use config.json values - no proxy routes needed
 # ---------------------------------------------------------------------------
 print("[voicebm] Audio URL patching complete")
 
