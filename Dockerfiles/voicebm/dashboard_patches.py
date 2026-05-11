@@ -349,15 +349,19 @@ if Path(STT_SERVICE).exists():
             print("[voicebm] ✓ Added PENDING_ADD_TO_GALLERY_TOPIC constant")
         
         # 5b. Add subscription to add_to_gallery topic
-        sub_line = 'client.subscribe("voicebm/pending_active/reject_btn", qos=1)'
-        new_sub_lines = sub_line + '\n    client.subscribe("voicebm/pending_active/add_to_gallery", qos=1)'
-        
-        if sub_line in stt_content and 'voicebm/pending_active/add_to_gallery' not in stt_content:
-            stt_content = stt_content.replace(sub_line, new_sub_lines, 1)
-            print("[voicebm] ✓ Added subscription to add_to_gallery topic")
+        # Pattern: find the play_btn subscription and add add_to_gallery after it
+        play_btn_sub = re.escape('client.subscribe("voicebm/pending_active/play_btn", qos=1)')
+        if re.search(play_btn_sub, stt_content):
+            # Insert the new subscription after play_btn
+            old_pattern = r'(client\.subscribe\("voicebm/pending_active/play_btn", qos=1\))'
+            new_pattern = r'\1\n        client.subscribe(PENDING_ADD_TO_GALLERY_TOPIC, qos=1)'
+            if 'PENDING_ADD_TO_GALLERY_TOPIC' in stt_content:
+                stt_content = re.sub(old_pattern, new_pattern, stt_content, count=1)
+                print("[voicebm] ✓ Added subscription to add_to_gallery topic")
         
         # 5c. Add elif handler in on_message()
-        handler_pattern = r'(elif topic == "voicebm/pending_active/play_btn":\s+handle_pending_play\(client, userdata, msg\))'
+        # Pattern: find play_btn handler and add add_to_gallery after it
+        handler_pattern = r'(elif topic == "voicebm/pending_active/play_btn":\s+handle_play_button\(client, userdata, msg\))'
         handler_addition = r'\1\n    elif topic == PENDING_ADD_TO_GALLERY_TOPIC:\n        handle_add_to_gallery(client, userdata, msg)'
         
         if re.search(handler_pattern, stt_content):
