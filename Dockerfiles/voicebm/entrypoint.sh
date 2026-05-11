@@ -9,7 +9,7 @@ MQTT_BROKER="${MQTT_BROKER:-localhost}"
 MQTT_PORT="${MQTT_PORT:-1883}"
 MQTT_USER="${MQTT_USER:-}"
 MQTT_PASS="${MQTT_PASS:-}"
-VOICEBM_HOST="${VOICEBM_HOST:-localhost}"
+AUDIO_HOST="${AUDIO_HOST:-localhost:9090}"
 
 # STT config
 VOICEBM_STT_MODEL="${VOICEBM_STT_MODEL:-cohere-transcribe}"
@@ -88,7 +88,7 @@ fill_template() {
         -e "s|{MQTT_USER}|${MQTT_USER}|g" \
         -e "s|{MQTT_PASS}|${MQTT_PASS}|g" \
         -e "s|{CONDA_PATH}|/usr|g" \
-        -e "s|10\.50\.60\.58|${VOICEBM_HOST}|g" \
+        -e "s|10\.50\.60\.58:9090|${AUDIO_HOST}|g" \
         "${src}" > "${dst}"
 }
 
@@ -227,7 +227,7 @@ python3 /app/dashboard_patches.py
 # Fix stale hardcoded IPs in pending.json
 PENDING_JSON="${DATA_DIR}/pending_active/pending.json"
 if [ -f "${PENDING_JSON}" ]; then
-    sed -i "s|10\.50\.60\.58|${VOICEBM_HOST}|g" "${PENDING_JSON}"
+    sed -i "s|10\.50\.60\.58:9090|${AUDIO_HOST}|g" "${PENDING_JSON}"
 fi
 
 # ---------------------------------------------------------------------------
