@@ -10,10 +10,6 @@ RUN apt-get update && apt-get install -y \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-# Install gosu for privilege dropping (lightweight alternative to sudo in containers)
-RUN curl -fsSL -o /usr/local/bin/gosu https://github.com/tianon/gosu/releases/download/1.17/gosu-amd64 && \
-    chmod +x /usr/local/bin/gosu
-
 # Install Python dependencies (including sherpa-onnx for embedded STT)
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir \
@@ -23,8 +19,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
         flask-cors \
         watchdog \
         numpy \
-        wyoming \
-        supervisor
+        wyoming
 
 # Download the latest VoiceBM release and extract templates + scripts
 RUN LATEST_URL=$(curl -fsSL https://api.github.com/repos/cybericebyte/VoiceBM/releases/latest \
@@ -50,8 +45,5 @@ RUN chmod +x /app/entrypoint.sh /app/config_generator.py /app/dashboard_patches.
 
 # Data directory (mounted from host)
 RUN mkdir -p /data
-
-# Supervisord directories
-RUN mkdir -p /etc/supervisor/conf.d
 
 ENTRYPOINT ["/bin/bash", "/app/entrypoint.sh"]

@@ -5,9 +5,11 @@ Run by entrypoint.sh after fill_template() completes.
 """
 import sys
 import re
+import json
 from pathlib import Path
 
 DASHBOARD = "/app/voicebm_dashboard.py"
+CONFIG_FILE = "/data/config.json"
 
 
 def patch(src, old, new, label):
@@ -23,6 +25,7 @@ if not Path(DASHBOARD).exists():
     print(f"[voicebm] Dashboard not found at {DASHBOARD}, skipping patches")
     sys.exit(0)
 
+
 src = open(DASHBOARD).read()
 
 # ---------------------------------------------------------------------------
@@ -32,6 +35,7 @@ src = open(DASHBOARD).read()
 #    Fix: read list directly, derive paths, delegate to stt_service via MQTT
 # ---------------------------------------------------------------------------
 
+# Identify the exact function body using a regex so we don't need exact whitespace
 m = re.search(
     r"(@app\.route\('/api/active/add_to_gallery'.*?)\n(@app\.route)",
     src,
@@ -152,88 +156,50 @@ def train_active_as_person():
 else:
     print("[voicebm] WARNING: train_active_as_person not found", file=sys.stderr)
 
+open(DASHBOARD, "w").write(src)
+
 # ---------------------------------------------------------------------------
-# 3. Fix audio URLs to use relative paths (browser-portable)
-#    Change: http://10.50.60.58:9090/pending/{id}.wav
-#    To:     /pending/{id}.wav
-#    This allows URLs to work regardless of host IP, domain, or proxy setup
+# 4. Fix voicebm_stt_service.py hardcoded audio URL
+#    Template has: "audio_url": f"http://10.50.60.58:9090/pending/{pending_id}.wav",
+#    Must replace with value from config.json
 # ---------------------------------------------------------------------------
 
 STT_SERVICE = "/app/voicebm_stt_service.py"
-stt_src = open(STT_SERVICE).read()
-stt_src = stt_src.replace(
-    '"audio_url": f"/api/audio/pending/{pending_id}.wav",',
-    '"audio_url": f"/pending/{pending_id}.wav",',
-    1
-)
-open(STT_SERVICE, "w").write(stt_src)
-print("[voicebm] Patched: voicebm_stt_service.py audio_url to /pending proxy")
 
-AUDIO_SERVER = "/app/audio_server.py"
-if open(AUDIO_SERVER).read().find("10.50.60.58") >= 0:
-    audio_src = open(AUDIO_SERVER).read()
-    audio_src = audio_src.replace(
-        '        print(f"  http://10.50.60.58:{PORT}/living/living_20251128_120000.wav")',
-        '        print(f"  /living/living_20251128_120000.wav")',
-        1
-    )
-    audio_src = audio_src.replace(
-        '        print(f"  http://10.50.60.58:{PORT}/pending/active_1732825200000.wav")',
-        '        print(f"  /pending/active_1732825200000.wav")',
-        1
-    )
-    open(AUDIO_SERVER, "w").write(audio_src)
-    print("[voicebm] Patched: audio_server.py example URLs to relative paths")
+try:
+    with open(CONFIG_FILE, 'r') as f:
+        config = json.load(f)
+    audio_base_url = config.get('audio_server', {}).get('base_url', 'http://10.50.60.58:9090')
+    print(f"[voicebm] Audio base URL from config: {audio_base_url}")
+except Exception as e:
+    print(f"[voicebm] WARNING: Could not load config for audio_url: {e}")
+    audio_base_url = 'http://10.50.60.58:9090'
 
-# ---------------------------------------------------------------------------
-# 4. Add audio proxy routes for /pending/ and /api/audio/
-#    Both proxy to audio_server on port 9090
-#    /pending/{file} is for backward compatibility and direct browser access
-#    /api/audio/{path} is for programmatic/API access
-# ---------------------------------------------------------------------------
-
-audio_proxy = '''
-@app.route('/pending/<path:filepath>')
-def proxy_pending(filepath):
-    """Proxy /pending/ requests to the audio server on port 9090"""
-    import urllib.request
-    url = f"http://localhost:9090/pending/{filepath}"
+if Path(STT_SERVICE).exists():
     try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            content_type = response.headers.get('content-type', 'audio/wav')
-            return app.response_class(
-                response.read(),
-                content_type=content_type,
-                status=response.status
-            )
+        with open(STT_SERVICE, 'r') as f:
+            stt_content = f.read()
+        
+        # Replace hardcoded audio URL
+        old_url = '"audio_url": f"http://10.50.60.58:9090/pending/{pending_id}.wav",'
+        new_url = f'"audio_url": f"{audio_base_url}/pending/{{pending_id}}.wav",'
+        
+        if old_url in stt_content:
+            stt_content = stt_content.replace(old_url, new_url, 1)
+            with open(STT_SERVICE, 'w') as f:
+                f.write(stt_content)
+            print(f"[voicebm] ✓ Fixed voicebm_stt_service.py audio_url to {audio_base_url}")
+        else:
+            print("[voicebm] • voicebm_stt_service.py audio_url already updated or not found")
     except Exception as e:
-        return jsonify({'error': f'Audio proxy error: {str(e)}'}), 500
-
-@app.route('/api/audio/<path:filepath>')
-def proxy_audio(filepath):
-    """Proxy /api/audio/ requests to the audio server on port 9090"""
-    import urllib.request
-    url = f"http://localhost:9090/{filepath}"
-    try:
-        with urllib.request.urlopen(url, timeout=10) as response:
-            content_type = response.headers.get('content-type', 'audio/wav')
-            return app.response_class(
-                response.read(),
-                content_type=content_type,
-                status=response.status
-            )
-    except Exception as e:
-        return jsonify({'error': f'Audio proxy error: {str(e)}'}), 500
-
-'''
-
-# Insert before "if __name__"
-if_main_pos = src.find('\nif __name__')
-if if_main_pos > 0:
-    src = src[:if_main_pos] + '\n' + audio_proxy + src[if_main_pos:]
-    print("[voicebm] Added: /pending/<file> and /api/audio/<path> proxy routes")
+        print(f"[voicebm] ERROR fixing voicebm_stt_service.py audio_url: {e}")
 else:
-    print("[voicebm] WARNING: could not find 'if __name__' insertion point", file=sys.stderr)
+    print(f"[voicebm] WARNING: {STT_SERVICE} not found")
+
+# ---------------------------------------------------------------------------
+# 5. Audio URLs now use config.json values - no proxy routes needed
+# ---------------------------------------------------------------------------
+print("[voicebm] Audio URL patching complete")
 
 open(DASHBOARD, "w").write(src)
 print("[voicebm] Dashboard patching complete")
